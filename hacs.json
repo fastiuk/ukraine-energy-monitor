@@ -1,5 +1,5 @@
 {
-  "name": "Ukraine Power Outages (графіки відключень)",
+  "name": "Графіки відключень світла (Ukraine Power Outages)",
   "country": "UA",
   "homeassistant": "2025.8.0",
   "render_readme": true

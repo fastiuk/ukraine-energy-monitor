@@ -32,3 +32,15 @@ def test_versions_agree():
     manifest = json.loads((ROOT / "custom_components" / "ukraine_outages" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["version"] == version
     assert USER_AGENT.startswith(f"ukraine-energy-monitor/{version} ")
+
+
+def test_the_name_is_found_in_ukrainian():
+    """Home Assistant's "Add integration" search (Fuse.js, threshold 0.2, distance 100) finds a word
+    only within the first ~20 characters of the name; "ukraine" and "outages" are found through
+    the domain. So the name starts with the words people type in Ukrainian."""
+    manifest = json.loads((ROOT / "custom_components" / "ukraine_outages" / "manifest.json").read_text(encoding="utf-8"))
+    hacs = json.loads((ROOT / "hacs.json").read_text(encoding="utf-8"))
+    assert manifest["name"] == hacs["name"]
+    start = manifest["name"][:20].lower()
+    assert "графіки" in start and "відключень" in start
+    assert manifest["domain"] == "ukraine_outages"
