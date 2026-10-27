@@ -8,6 +8,7 @@ and how the source is doing.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,6 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
-from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
@@ -36,9 +36,10 @@ async def async_register(hass: HomeAssistant) -> None:
         return
     from homeassistant.components.frontend import add_extra_js_url
 
-    version = (await async_get_integration(hass, DOMAIN)).version
+    # Browsers cache the file: its address changes with its content, not only with a release.
+    digest = await hass.async_add_executor_job(lambda: hashlib.sha256(SCRIPT.read_bytes()).hexdigest()[:12])
     await hass.http.async_register_static_paths([StaticPathConfig(URL, str(SCRIPT), True)])
-    add_extra_js_url(hass, f"{URL}?v={version}")
+    add_extra_js_url(hass, f"{URL}?v={digest}")
 
 
 def _minutes(moment: datetime, midnight: datetime) -> int:
