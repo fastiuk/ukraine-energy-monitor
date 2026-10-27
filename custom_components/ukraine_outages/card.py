@@ -98,12 +98,14 @@ def card_data(coordinator: OutageCoordinator) -> dict[str, Any]:
 @callback
 def ws_card(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     device = dr.async_get(hass).async_get(msg["device_id"])
+    if device is None:
+        owners: set[str] = set()
+    elif hasattr(device, "config_entry_id"):  # newer Home Assistant: a device belongs to one entry
+        owners = {device.config_entry_id}
+    else:
+        owners = set(device.config_entries)
     entry = next(
-        (
-            e
-            for e in hass.config_entries.async_entries(DOMAIN)
-            if device is not None and e.entry_id in device.config_entries and e.state is ConfigEntryState.LOADED
-        ),
+        (e for e in hass.config_entries.async_entries(DOMAIN) if e.entry_id in owners and e.state is ConfigEntryState.LOADED),
         None,
     )
     if entry is None:

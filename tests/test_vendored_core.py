@@ -1,6 +1,7 @@
 """The Home Assistant integration ships its own copy of ua_outages; keep it identical, same version."""
 
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -44,3 +45,22 @@ def test_the_name_is_found_in_ukrainian():
     start = manifest["name"][:20].lower()
     assert "графіки" in start and "відключень" in start
     assert manifest["domain"] == "ukraine_outages"
+
+
+def _strings(tree, path=()):
+    if isinstance(tree, dict):
+        for key, value in tree.items():
+            yield from _strings(value, (*path, key))
+    elif isinstance(tree, str):
+        yield path, tree
+
+
+def test_translations_have_every_string_with_the_same_placeholders():
+    """Home Assistant drops a translation whose placeholders differ from strings.json (and logs an error)."""
+    component = ROOT / "custom_components" / "ukraine_outages"
+    source = dict(_strings(json.loads((component / "strings.json").read_text(encoding="utf-8"))))
+    for lang in ("en", "uk"):
+        translated = dict(_strings(json.loads((component / "translations" / f"{lang}.json").read_text(encoding="utf-8"))))
+        assert translated.keys() == source.keys(), lang
+        for path, text in source.items():
+            assert set(re.findall(r"\{(\w+)\}", translated[path])) == set(re.findall(r"\{(\w+)\}", text)), (lang, path)
