@@ -102,6 +102,10 @@
       },
       "source_ok": {
         "name": "Source responding",
+        "state": {
+          "on": "Responding",
+          "off": "Not responding"
+        },
         "state_attributes": {
           "source": {
             "name": "Source"

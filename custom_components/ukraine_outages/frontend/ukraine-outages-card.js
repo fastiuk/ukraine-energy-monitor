@@ -28,6 +28,7 @@ const STRINGS = {
     on_tomorrow: "Увімкнуть завтра о {time}",
     left: "через {left}",
     nothing: "Відключень за графіком не видно",
+    nothing_published: "Графік ще не опубліковано",
     today: "Сьогодні",
     tomorrow: "Завтра",
     not_published: "Ще не опубліковано",
@@ -35,8 +36,11 @@ const STRINGS = {
     without: "без світла {hours}",
     picture: "Графік на картинці оператора",
     updated: "Оновлено {time}",
-    source: "джерело: {name}",
-    source_down: "Сайт оператора не відповідає — показано останній відомий графік",
+    source: "джерело {name}",
+    source_ok: "відповідає",
+    source_bad: "не відповідає",
+    source_down: "Показано останній відомий графік",
+    last_answer: "востаннє джерело відповіло {time}",
     hours: "год",
     minutes: "хв",
     pick: "Оберіть у налаштуваннях картки чергу (пристрій інтеграції).",
@@ -65,8 +69,11 @@ const STRINGS = {
     without: "{hours} without power",
     picture: "The schedule is on the operator's picture",
     updated: "Updated {time}",
-    source: "source: {name}",
-    source_down: "The operator's site does not answer — showing the last known schedule",
+    source: "source {name}",
+    source_ok: "responding",
+    source_bad: "not responding",
+    source_down: "Showing the last known schedule",
+    last_answer: "the source last answered {time}",
     hours: "h",
     minutes: "min",
     pick: "Choose a group (a device of the integration) in the card's settings.",
@@ -101,6 +108,12 @@ function clock(iso, language) {
 
 function kyivDate(iso) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: KYIV }).format(new Date(iso));
+}
+
+function moment(iso, today, language) {
+  if (kyivDate(iso) === today) return clock(iso, language);
+  const options = { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: KYIV, hourCycle: "h23" };
+  return new Intl.DateTimeFormat(language, options).format(new Date(iso));
 }
 
 function span(minutes, t) {
@@ -140,7 +153,7 @@ function cells(day) {
 const STYLE = `
   :host { display: block; }
   ha-card { padding: 16px; }
-  .head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .head .sub { margin-top: 2px; }
   .title { font-size: 1.15em; font-weight: 500; }
   .sub, .foot, .ticks, .note, .day-head .sum { color: var(--secondary-text-color); font-size: 0.85em; }
   .status { display: flex; gap: 12px; align-items: center; margin: 12px 0; padding: 10px 12px; border-radius: 10px;
@@ -166,10 +179,11 @@ const STYLE = `
   .note a { color: var(--primary-color); }
   .foot { margin-top: 12px; }
   .warn { color: var(--warning-color, #ffa600); }
+  .ok { color: var(--success-color, #43a047); }
   .row { padding: 8px 0; border-top: 1px solid var(--divider-color, #e0e0e0); }
   .row:first-of-type { border-top: 0; }
   .row-head { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 12px; }
-  .row-name { font-weight: 500; flex: none; }
+  .row-name { font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--state-color); margin-right: 6px; }
   .empty { color: var(--secondary-text-color); }
 `;
@@ -280,7 +294,8 @@ class UkraineOutagesCard extends HTMLElement {
       };
     }
     const published = data.days.some((d) => d.published);
-    return { state: published ? "on" : "unknown", label: published ? t.on : t.unknown, when: t.nothing };
+    if (published) return { state: "on", label: t.on, when: t.nothing };
+    return { state: "unknown", label: t.unknown, when: t.nothing_published };
   }
 
   _bar(day, nowMinute, small) {
@@ -325,8 +340,10 @@ class UkraineOutagesCard extends HTMLElement {
 
   _full(card, data, t, language) {
     const head = el("div", "head");
-    head.append(el("div", "title", this._config.title || data.title));
-    head.append(el("div", "sub", `${data.operator}`));
+    const title = this._config.title || data.title;
+    head.append(el("div", "title", title));
+    // A region with several operators names the operator in the title already.
+    if (!title.includes(data.operator)) head.append(el("div", "sub", data.operator));
     card.append(head);
 
     const status = this._status(data, t, language);
@@ -343,13 +360,19 @@ class UkraineOutagesCard extends HTMLElement {
     if (this._config.show_tomorrow !== false && tomorrow) card.append(this._day(tomorrow, t.tomorrow, null, t));
 
     const foot = el("div", "foot");
-    const parts = [];
     const updated = data.days.map((d) => d.updated_at).filter(Boolean).sort().pop();
-    if (updated) parts.push(fill(t.updated, { time: clock(updated, language) }));
-    if (data.source.name) parts.push(fill(t.source, { name: data.source.name }));
-    foot.textContent = parts.join(" · ");
+    if (updated) foot.append(fill(t.updated, { time: clock(updated, language) }));
+    if (data.source.name) {
+      if (updated) foot.append(" · ");
+      foot.append(`${fill(t.source, { name: data.source.name })}: `);
+      foot.append(el("span", data.source.ok ? "ok" : "warn", data.source.ok ? t.source_ok : t.source_bad));
+    }
     card.append(foot);
-    if (!data.source.ok) card.append(el("div", "foot warn", t.source_down));
+    if (!data.source.ok) {
+      const parts = [t.source_down];
+      if (data.source.last_success) parts.push(fill(t.last_answer, { time: moment(data.source.last_success, kyivDate(data.now), language) }));
+      card.append(el("div", "note warn", parts.join("; ")));
+    }
   }
 
   _row(card, data, t, language) {

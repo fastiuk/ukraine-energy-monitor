@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
-from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
+from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -68,9 +68,11 @@ class PossibleOutageBinarySensor(OutageEntity, BinarySensorEntity):
 
 
 class SourceBinarySensor(OutageEntity, BinarySensorEntity):
-    """On while the operator's source answers; stays available when it does not (that is the news)."""
+    """On while the operator's source answers; stays available when it does not (that is the news).
 
-    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    No connectivity device class: its «Відключено» would read as «no power». The states are its own
+    («Відповідає» / «Не відповідає»)."""
+
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: OutageCoordinator) -> None:
