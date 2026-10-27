@@ -161,7 +161,7 @@ automation:
 ## Бібліотека `ua_outages`
 
 ```bash
-pip install "ukraine-energy-monitor @ https://github.com/fastiuk/ukraine-energy-monitor/archive/refs/tags/v0.5.0.tar.gz"
+pip install "ukraine-energy-monitor @ https://github.com/fastiuk/ukraine-energy-monitor/archive/refs/tags/v0.5.1.tar.gz"
 ```
 
 ```python
