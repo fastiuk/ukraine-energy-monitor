@@ -415,7 +415,8 @@ class UkraineOutagesCard extends HTMLElement {
 
 class UkraineOutagesCardEditor extends HTMLElement {
   setConfig(config) {
-    this._config = { ...config, devices: deviceIds(config) };
+    // The card shows tomorrow unless told not to: so does the switch.
+    this._config = { show_tomorrow: true, ...config, devices: deviceIds(config) };
     this._render();
   }
 
