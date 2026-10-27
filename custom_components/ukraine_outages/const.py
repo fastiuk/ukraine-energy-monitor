@@ -19,3 +19,8 @@ MAX_SCAN_INTERVAL = 60
 SHARED_FETCH_TTL = 60
 
 ATTRIBUTION = "Дані: оператори систем розподілу (обленерго, ДТЕК, YASNO)"
+
+#: A source failing this long becomes a Repairs issue (it recovers by itself; this says why data is old).
+SOURCE_ISSUE_AFTER_HOURS = 3
+#: What the bot sees of every source from Ukraine: whether it is the operator's site or the entry.
+STATUS_PAGE = "https://github.com/fastiuk/ukraine-energy-monitor-status#readme"

@@ -99,6 +99,23 @@
       },
       "possible_outage": {
         "name": "Можливе відключення зараз"
+      },
+      "source_ok": {
+        "name": "Джерело відповідає",
+        "state_attributes": {
+          "source": {
+            "name": "Джерело"
+          },
+          "last_success": {
+            "name": "Востаннє відповіло"
+          },
+          "failing_since": {
+            "name": "Не відповідає з"
+          },
+          "last_error": {
+            "name": "Остання помилка"
+          }
+        }
       }
     },
     "calendar": {
@@ -121,6 +138,36 @@
       },
       "source": {
         "name": "Джерело даних"
+      }
+    },
+    "event": {
+      "schedule": {
+        "name": "Графік",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "schedule_published": "Опубліковано",
+              "schedule_changed": "Змінено"
+            }
+          }
+        }
+      }
+    }
+  },
+  "issues": {
+    "source_unavailable": {
+      "title": "{operator} не відповідає",
+      "description": "Home Assistant не може отримати графік відключень з {since}: `{error}`\n\nПоказано останній відомий графік. Сайти операторів часто лягають саме під час відключень; повідомлення зникне само, щойно сайт відповість. На сторінці стану проєкту видно, чи джерело недоступне для всіх."
+    },
+    "address_moved": {
+      "title": "Оператор переніс {address} у {label} {new}",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "{address}: тепер {label} {new}",
+            "description": "За довідником оператора {address} тепер у черзі {new} (була {old}). Запис уже стежить за новою чергою. Перевірте автоматизації й панелі, де згадано {old}, і підтвердіть."
+          }
+        }
       }
     }
   }

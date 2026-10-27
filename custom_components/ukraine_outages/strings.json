@@ -99,6 +99,23 @@
       },
       "possible_outage": {
         "name": "Possible outage now"
+      },
+      "source_ok": {
+        "name": "Source responding",
+        "state_attributes": {
+          "source": {
+            "name": "Source"
+          },
+          "last_success": {
+            "name": "Last success"
+          },
+          "failing_since": {
+            "name": "Failing since"
+          },
+          "last_error": {
+            "name": "Last error"
+          }
+        }
       }
     },
     "calendar": {
@@ -121,6 +138,36 @@
       },
       "source": {
         "name": "Data source"
+      }
+    },
+    "event": {
+      "schedule": {
+        "name": "Schedule",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "schedule_published": "Published",
+              "schedule_changed": "Changed"
+            }
+          }
+        }
+      }
+    }
+  },
+  "issues": {
+    "source_unavailable": {
+      "title": "{operator} does not answer",
+      "description": "Home Assistant has not been able to fetch the outage schedule since {since}: `{error}`\n\nThe last known schedule is still shown. Operators' sites often go down during outages; this goes away by itself once the site answers. The project's status page shows whether the source is down for everyone."
+    },
+    "address_moved": {
+      "title": "The operator moved {address} to {label} {new}",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "{address}: now {label} {new}",
+            "description": "The operator's directory now puts {address} in {label} {new} (it was {old}). The entry already follows the new group. Check automations and dashboards that mention {old}, then confirm."
+          }
+        }
       }
     }
   }

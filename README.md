@@ -83,10 +83,19 @@ Telegram-бот із сервера в Україні опитує джерел�
 | `sensor` «Без світла сьогодні» | скільки годин без світла сьогодні за графіком |
 | `sensor` «Графік оновлено» | коли оператор востаннє оновив графік (діагностика) |
 | `sensor` «Джерело даних» | з якого джерела прийшли дані (діагностика, вимкнена за замовчуванням) |
+| `event` «Графік» | спрацьовує, коли оператор опублікував графік на день (`schedule_published`) або змінив уже опублікований (`schedule_changed`); атрибути `day` (`today` / `tomorrow`), `date`, `outages`, `possible`, а для змін ще `previous` і `previous_possible` |
+| `binary_sensor` «Джерело відповідає» | чи відповіло джерело під час останнього опитування (діагностика); атрибути `last_success`, `failing_since`, `last_error` |
 
 Стан змінюється рівно на межах відключень, а не лише після чергового опитування. Якщо сайт
 оператора недоступний, сутності показують останній відомий графік. Кілька черг одного оператора
 опитують його сайт один раз.
+
+Інтеграція повідомляє в Repairs (угорі сторінки **Налаштування**), коли:
+
+- джерело оператора не відповідає понад 3 години (зникає саме, щойно джерело відповіло; стан
+  джерел — на [сторінці статусу](https://github.com/fastiuk/ukraine-energy-monitor-status#readme));
+- адреса перейшла в іншу чергу: інтеграція вже стежить за новою чергою й перейменувала пристрій,
+  а повідомлення нагадує перевірити автоматизації, що згадують стару.
 
 ### Встановлення через HACS
 
@@ -105,6 +114,33 @@ Telegram-бот із сервера в Україні опитує джерел�
 параметрах інтеграції.
 
 Без HACS: скопіюйте `custom_components/ukraine_outages` у `config/custom_components/`.
+
+### Картка
+
+Інтеграція сама додає картку «Графік відключень» — окремо встановлювати нічого не треба (після
+оновлення інтеграції оновіть сторінку браузера). **Редагувати панель → Додати картку → Графік
+відключень** і оберіть пристрій-чергу: картка показує, чи є світло зараз, відлік до вимкнення чи
+увімкнення, графік на сьогодні й завтра півгодинними клітинками (можливі відключення —
+заштриховані) і попередження, коли джерело не відповідає. Кілька черг в одній картці показуються
+компактними рядками.
+
+```yaml
+type: custom:ukraine-outages-card
+devices:
+  - 0123456789abcdef0123456789abcdef   # ідентифікатор пристрою; візуальний редактор підставить сам
+title: Мої черги          # необов'язково
+show_tomorrow: true       # необов'язково
+```
+
+### Сповіщення
+
+[![Імпортувати blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Ffastiuk%2Fukraine-energy-monitor%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fukraine_outages%2Fnotifications.yaml)
+
+Blueprint [`notifications.yaml`](blueprints/automation/ukraine_outages/notifications.yaml) надсилає
+сповіщення для однієї черги: за N хвилин до відключення, коли воно почалося й закінчилося, коли
+опублікували графік на день і коли його змінили (з тим, як було). Кожне вмикається окремо. У
+«Надіслати» додайте свої дії — `notify.mobile_app_…`, Telegram тощо — з `{{ title }}` і
+`{{ message }}`.
 
 ### Приклад автоматизації
 
@@ -125,7 +161,7 @@ automation:
 ## Бібліотека `ua_outages`
 
 ```bash
-pip install "ukraine-energy-monitor @ https://github.com/fastiuk/ukraine-energy-monitor/archive/refs/tags/v0.3.1.tar.gz"
+pip install "ukraine-energy-monitor @ https://github.com/fastiuk/ukraine-energy-monitor/archive/refs/tags/v0.5.0.tar.gz"
 ```
 
 ```python
@@ -160,6 +196,8 @@ asyncio.run(main())
 - `src/ua_outages` — моделі, джерела (по модулю на тип сайту), пошук за адресою, реєстр регіонів;
 - `custom_components/ukraine_outages` — інтеграція для Home Assistant з власною копією
   `ua_outages` (тест `tests/test_vendored_core.py` стежить, щоб копія не відставала);
+  картка — `custom_components/ukraine_outages/frontend`;
+- `blueprints/automation/ukraine_outages` — blueprint сповіщень;
 - `scripts/source_status.py` — перевірка джерел (`ua_outages.status`), та сама, що публікує бот.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — як влаштована бібліотека: схема потоку даних і діаграма класів.
 

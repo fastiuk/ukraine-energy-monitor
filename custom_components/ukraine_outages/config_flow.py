@@ -33,7 +33,7 @@ from .const import (
     DOMAIN,
     MAX_SCAN_INTERVAL,
 )
-from .coordinator import scan_minutes
+from .coordinator import entry_title, scan_minutes
 from .ua_outages import REGIONS, Choice, FetchError, Operator, Region, operator
 from .ua_outages.providers._address import clean_query
 from .ua_outages.registry import REGIONS_BY_ID
@@ -265,13 +265,6 @@ class OutagesConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         return OutagesOptionsFlow()
-
-
-def entry_title(op: Operator, group: str, address_label: str | None = None) -> str:
-    """"м. Київ · група 19.1", "Дніпропетровська · ЦЕК · черга 3.2", "Тернопіль, вул. Руська, 1 · черга 3.2"."""
-    region = REGIONS_BY_ID[op.region]
-    where = address_label or (region.name if len(region.operators) == 1 else f"{region.name} · {op.name}")
-    return f"{where} · {op.group_label} {group}"
 
 
 class OutagesOptionsFlow(OptionsFlowWithReload):

@@ -1,0 +1,156 @@
+blueprint:
+  name: Графік відключень — сповіщення
+  description: >-
+    Сповіщення для однієї черги інтеграції «Графіки відключень світла»: за кілька хвилин до
+    відключення за графіком, коли воно почалося й закінчилося, коли опублікували графік на завтра
+    і коли графік змінили. Кожне можна вимкнути.
+
+
+    У «Надіслати» додайте дії, що доставляють повідомлення, з `{{ title }}` і `{{ message }}`:
+    наприклад, `notify.mobile_app_<телефон>` чи `notify.send_message` у Telegram.
+    «Виконати дії» вручну надсилає пробне повідомлення.
+  domain: automation
+  source_url: https://github.com/fastiuk/ukraine-energy-monitor/blob/main/blueprints/automation/ukraine_outages/notifications.yaml
+  input:
+    outage_entity:
+      name: Відключення зараз
+      description: Бінарний сенсор «Відключення зараз» вашої черги.
+      selector:
+        entity:
+          filter:
+            - integration: ukraine_outages
+              domain: binary_sensor
+    next_outage_entity:
+      name: Наступне відключення
+      description: Сенсор «Наступне відключення» тієї самої черги.
+      selector:
+        entity:
+          filter:
+            - integration: ukraine_outages
+              domain: sensor
+              device_class: timestamp
+    schedule_entity:
+      name: Графік
+      description: Подія «Графік» тієї самої черги (опубліковано чи змінено).
+      selector:
+        entity:
+          filter:
+            - integration: ukraine_outages
+              domain: event
+    lead_minutes:
+      name: Попередити за (хвилин)
+      description: 0 — не попереджати.
+      default: 15
+      selector:
+        number:
+          min: 0
+          max: 180
+          step: 5
+          unit_of_measurement: хв
+    notify_start:
+      name: Коли почалося відключення
+      default: true
+      selector:
+        boolean: {}
+    notify_end:
+      name: Коли відключення закінчилося
+      default: true
+      selector:
+        boolean: {}
+    notify_published:
+      name: Коли опублікували графік
+      default: true
+      selector:
+        boolean: {}
+    notify_changed:
+      name: Коли графік змінили
+      default: true
+      selector:
+        boolean: {}
+    actions:
+      name: Надіслати
+      description: Дії, що доставляють повідомлення; в них доступні `{{ title }}` і `{{ message }}`.
+      default: []
+      selector:
+        action: {}
+
+mode: queued
+max: 10
+
+trigger_variables:
+  next_outage_entity: !input next_outage_entity
+  lead_minutes: !input lead_minutes
+
+triggers:
+  - trigger: template
+    id: soon
+    value_template: >-
+      {% set start = states(next_outage_entity) | as_datetime(none) %}
+      {{ lead_minutes | int(0) > 0 and start is not none
+         and now() >= start - timedelta(minutes=lead_minutes | int(0)) and now() < start }}
+  - trigger: state
+    id: start
+    entity_id: !input outage_entity
+    from: "off"
+    to: "on"
+  - trigger: state
+    id: end
+    entity_id: !input outage_entity
+    from: "on"
+    to: "off"
+  - trigger: state
+    id: schedule
+    entity_id: !input schedule_entity
+
+variables:
+  outage_entity: !input outage_entity
+  notify_start: !input notify_start
+  notify_end: !input notify_end
+  notify_published: !input notify_published
+  notify_changed: !input notify_changed
+  queue: "{{ device_attr(device_id(outage_entity), 'name') or state_attr(outage_entity, 'friendly_name') }}"
+  # A new event, not the entity coming back after a restart.
+  event: >-
+    {% if trigger is defined and trigger.id == 'schedule' and trigger.from_state is not none
+          and trigger.from_state.state != 'unavailable'
+          and trigger.to_state.state not in ['unavailable', 'unknown']
+          and trigger.to_state.state != trigger.from_state.state %}
+      {{ trigger.to_state.attributes.get('event_type') }}
+    {% else %}none{% endif %}
+  day_name: >-
+    {% set a = trigger.to_state.attributes if trigger is defined and trigger.id == 'schedule' else {} %}
+    {{ 'сьогодні' if a.get('day') == 'today' else 'завтра' if a.get('day') == 'tomorrow' else a.get('date', '') }}
+  outages: >-
+    {% set a = trigger.to_state.attributes if trigger is defined and trigger.id == 'schedule' else {} %}
+    {{ (a.get('outages') or []) | join(', ') or 'без відключень' }}
+  title: >-
+    {% set id = trigger.id if trigger is defined else 'manual' %}
+    {% if id == 'soon' %}⚡ Скоро відключення
+    {% elif id == 'start' %}🔴 Відключення за графіком
+    {% elif id == 'end' %}🟢 Відключення за графіком закінчилося
+    {% elif id == 'schedule' and event == 'schedule_published' %}📅 Графік на {{ day_name }}
+    {% elif id == 'schedule' and event == 'schedule_changed' %}✏️ Графік на {{ day_name }} змінено
+    {% elif id == 'manual' %}🔔 Перевірка сповіщень
+    {% endif %}
+  message: >-
+    {% set id = trigger.id if trigger is defined else 'manual' %}
+    {% if id == 'soon' %}{{ queue }}: о {{ as_timestamp(states(next_outage_entity)) | timestamp_custom('%H:%M') }} вимкнуть світло.
+    {% elif id == 'start' %}{{ queue }}: світло мають вимкнути зараз.
+    {% elif id == 'end' %}{{ queue }}: світло мають увімкнути.
+    {% elif id == 'schedule' and event == 'schedule_published' %}{{ queue }}: {{ outages }}.
+    {% elif id == 'schedule' and event == 'schedule_changed' %}{{ queue }}: тепер {{ outages }}{% set p = trigger.to_state.attributes.get('previous') %}{% if p is not none %} (було: {{ p | join(', ') or 'без відключень' }}){% endif %}.
+    {% elif id == 'manual' %}{{ queue }}: сповіщення працюють.
+    {% endif %}
+
+conditions:
+  - condition: template
+    value_template: >-
+      {% set id = trigger.id if trigger is defined else 'manual' %}
+      {{ id == 'manual' or id == 'soon'
+         or (id == 'start' and notify_start) or (id == 'end' and notify_end)
+         or (id == 'schedule' and event == 'schedule_published' and notify_published)
+         or (id == 'schedule' and event == 'schedule_changed' and notify_changed) }}
+  - condition: template
+    value_template: "{{ title | trim != '' }}"
+
+actions: !input actions

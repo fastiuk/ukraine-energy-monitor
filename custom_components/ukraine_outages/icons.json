@@ -12,6 +12,12 @@
         "state": {
           "on": "mdi:transmission-tower-export"
         }
+      },
+      "source_ok": {
+        "default": "mdi:web-check",
+        "state": {
+          "off": "mdi:web-off"
+        }
       }
     },
     "calendar": {
@@ -34,6 +40,11 @@
       },
       "source": {
         "default": "mdi:web"
+      }
+    },
+    "event": {
+      "schedule": {
+        "default": "mdi:calendar-alert"
       }
     }
   }

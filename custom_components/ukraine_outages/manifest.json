@@ -1,13 +1,15 @@
 {
   "domain": "ukraine_outages",
   "name": "Графіки відключень світла (Ukraine Power Outages)",
+  "after_dependencies": ["frontend"],
   "codeowners": ["@fastiuk"],
   "config_flow": true,
+  "dependencies": ["http", "repairs", "websocket_api"],
   "documentation": "https://github.com/fastiuk/ukraine-energy-monitor",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/fastiuk/ukraine-energy-monitor/issues",
   "loggers": ["custom_components.ukraine_outages.ua_outages"],
   "requirements": [],
-  "version": "0.4.8"
+  "version": "0.5.0"
 }

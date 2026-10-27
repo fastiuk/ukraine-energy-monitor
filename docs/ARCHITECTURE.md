@@ -26,7 +26,7 @@ flowchart LR
         timeline["timeline<br/>trim · merge ·<br/>diff · events"]
     end
 
-    ha(["Home Assistant<br/>SourceHub → OutageCoordinator →<br/>сенсори, календар"])
+    ha(["Home Assistant<br/>SourceHub → OutageCoordinator →<br/>сенсори, календар, подія, картка"])
     bot(["Telegram-бот<br/>Monitor → сповіщення"])
     badges(["Бейджі стану<br/>ukraine-energy-monitor-status"])
 
@@ -215,4 +215,4 @@ classDiagram
 | `registry.py` | `Region`, `Operator`, усі області й оператори, порядок джерел |
 | `timeline.py` | `trim_schedules`, `merge_schedules`, `diff_schedules` → `DayChange`, `group_events`, `current_outage`, `next_outage` |
 | `status.py` | перевірка кожного джерела, бейджі, таблиця README |
-| `custom_components/ukraine_outages/` | інтеграція Home Assistant: `SourceHub` (одне звернення на оператора для всіх записів) → `OutageCoordinator` → сенсори, бінарні сенсори, календар; власна копія `ua_outages` |
+| `custom_components/ukraine_outages/` | інтеграція Home Assistant: `SourceHub` (одне звернення на оператора для всіх записів) → `OutageCoordinator` → сенсори, бінарні сенсори, календар, подія «Графік» (з `diff_schedules`), Repairs; картка (`card.py` віддає їй дані через websocket, `frontend/` — сама картка); власна копія `ua_outages` |
