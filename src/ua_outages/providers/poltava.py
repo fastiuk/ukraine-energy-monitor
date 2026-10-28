@@ -1,9 +1,12 @@
 """Poltavaoblenergo: the schedule table ``POST https://www.poe.pl.ua/customs/newgpv-info.php`` returns.
 
 The request carries only the date (``seldate={"date_in":"18-10-2026"}``, dashes only); the
-answer is an HTML fragment with a summary and ``table.turnoff-scheduleui-table``: per
-subqueue a row of 48 half-hour cells, ``light_1`` power on, ``light_2`` off, ``light_3``
-switching time when power may be off. An empty body means the day is not published yet.
+answer is an HTML fragment with a summary and ``table.gpv-table`` (since 27.10.2026): per
+subqueue a row, ``td.gpv-q`` «1.1» and 48 half-hour cells, ``gpv-s1`` power on, ``gpv-s2`` off,
+``gpv-s3`` switching time when power may be off. (The same hours again in ``table.gpv-vtable``,
+by time for phones.) Before that it was ``table.turnoff-scheduleui-table``, a queue cell
+«1 черга» over two subqueue rows and ``light_1``/``light_2``/``light_3`` cells; it is still read,
+in case the site goes back. An empty body means the day is not published yet.
 
 The group of an address: the filials are the options of ``select#input-filial-main`` on the
 outages page; ``POST /customs/search-disconnection-cabinet.php`` with
@@ -33,20 +36,33 @@ FILIALS_URL = "https://www.poe.pl.ua/disconnection/power-outages/"
 SEARCH_URL = "https://www.poe.pl.ua/customs/search-disconnection-cabinet.php"
 RESULT_URL = "https://www.poe.pl.ua/customs/disconnectinforesult-cabinet.php"
 CELLS = {"light_1": Slot.ON, "light_2": Slot.OFF, "light_3": Slot.MAYBE}
+GPV_CELLS = {"gpv-s1": Slot.ON, "gpv-s2": Slot.OFF, "gpv-s3": Slot.MAYBE}
 _QUEUE_RE = re.compile(r"(\d)\s{0,3}черга")
+_GROUP_RE = re.compile(r"(\d)\.([12])")
+
+
+def _cells(row: Any) -> list[Any]:
+    return [c for c in row.children if not isinstance(c, str) and c.tag == "td"]
+
+
+def _slots(cells: Sequence[Any], kinds: dict[str, Slot]) -> list[Slot | None]:
+    return [next((kinds[c] for c in cell.classes if c in kinds), None) for cell in cells]
 
 
 def parse(fragment: str, day: date) -> DaySchedule | None:
     if not fragment.strip():
         return None
-    table = parse_html(fragment).find("table", cls="turnoff-scheduleui-table")
+    root = parse_html(fragment)
+    if (table := root.find("table", cls="gpv-table")) is not None:
+        return _parse_gpv(table, day)
+    table = root.find("table", cls="turnoff-scheduleui-table")
     if table is None:
         fail("Poltava: no schedule table")
     groups: dict[str, tuple[Outage, ...]] = {}
     unknown: dict[str, str] = {}
     queue = None
     for row in table.find_all("tr"):
-        cells = [c for c in row.children if not isinstance(c, str) and c.tag == "td"]
+        cells = _cells(row)
         if not cells:
             continue
         if "turnoff-scheduleui-table-queue" in cells[0].classes:
@@ -58,7 +74,28 @@ def parse(fragment: str, day: date) -> DaySchedule | None:
         if (subqueue := cells[0].text()) not in ("1", "2"):
             continue
         group = f"{queue}.{subqueue}"
-        states = [next((CELLS[c] for c in cell.classes if c in CELLS), None) for cell in cells[1:]]
+        states = _slots(cells[1:], CELLS)
+        if len(states) != 48 or None in states:
+            unknown[group] = "Нерозпізнаний графік"
+        else:
+            groups[group] = outages_from_slots(day, states)  # type: ignore[arg-type]
+    if not groups and not unknown:
+        fail("Poltava: the schedule table has no rows")
+    return DaySchedule(day, groups=groups, unknown=unknown)
+
+
+def _parse_gpv(table: Any, day: date) -> DaySchedule:
+    groups: dict[str, tuple[Outage, ...]] = {}
+    unknown: dict[str, str] = {}
+    for row in table.find_all("tr"):
+        cells = _cells(row)
+        if not cells or "gpv-q" not in cells[0].classes:
+            continue
+        # Only a subqueue «1.1»…«6.2»: anything else would become a made-up group.
+        if not (m := _GROUP_RE.fullmatch(cells[0].text().strip())):
+            continue
+        group = f"{m[1]}.{m[2]}"
+        states = _slots(cells[1:], GPV_CELLS)
         if len(states) != 48 or None in states:
             unknown[group] = "Нерозпізнаний графік"
         else:

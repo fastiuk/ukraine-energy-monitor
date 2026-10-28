@@ -149,6 +149,28 @@ def test_poltava():
     assert sorted(forged.groups) == sorted(set(STANDARD_GROUPS) - {"1.1"})
 
 
+def test_poltava_since_27_october():
+    """The site's new table (27.10.2026): a row per subqueue, 48 cells gpv-s1/s2/s3."""
+    oct29 = date(2026, 10, 29)
+    page = fixture_text("poltava_2026-10-29.html")
+    s = poltava.parse(page, oct29)
+    assert sorted(s.groups) == sorted(STANDARD_GROUPS) and not s.unknown
+    assert spans(s, "1.1") == [
+        ("10:00", "12:30", False),
+        ("12:30", "13:00", True),
+        ("16:00", "18:30", False),
+        ("18:30", "19:00", True),
+        ("22:00", "23:30", False),
+        ("23:30", "24:00", True),
+    ]
+    assert spans(s, "3.1")[0] == ("00:00", "00:30", True)
+    # A queue cell must be a subqueue «1.1»…«6.2»; a row with a cell missing is not guessed.
+    forged = poltava.parse(page.replace('title="Черга 1, підчерга 1">1.1<', 'title="Черга 1, підчерга 1">1.1 <b>x</b><', 1), oct29)
+    assert "1.1" not in forged.groups and "1.1" not in forged.unknown
+    short = page.replace('<td class="gpv-c gpv-s1 gpv-h gpv-past" title="1.1: 00:00–00:30', '<td title="1.1: 00:00–00:30', 1)
+    assert poltava.parse(short, oct29).unknown == {"1.1": "Нерозпізнаний графік"}
+
+
 def test_zhytomyr():
     schedules = zhytomyr.parse(fixture_text("zhytomyr.html"))
     s = schedules[OCT18]
