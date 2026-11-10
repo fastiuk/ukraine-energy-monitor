@@ -9,6 +9,9 @@
 - The image is 1920 px wide, its height varies with the template: the grid is found from the
   ink of its lines. 12 rows (1.1–6.2), 24 hourly columns, each read as two half-hours.
   #8FAADC — no power, white — power, #CFCDCD — maybe (in the legend; not seen in a grid yet).
+- No image (the post has none yet, or none can be read): the schedule is taken from the text,
+  «Підчерга 1.1 – 10:00-14:00; 22:00-24:00», first in the post, then on
+  ``/page/pogodinni-vidkljuchennja`` (versions split by a rule, newest on top).
 - A text correction published after the newest image («підчерга 2.1 - відключення триватимуть
   з 16:00 до 17:00») is shown as a note: the image does not include it yet.
 
@@ -234,6 +237,91 @@ def parse_image(png: bytes, day: date) -> Decoded:
     return groups, unknown
 
 
+#: Text schedule: «Підчерга 1.1 – 10:00-14:00; 22:00-24:00.», a block per version, newest first.
+_TEXT_DAY_RE = re.compile(r"(\d{1,2})\s{1,3}(" + "|".join(MONTHS) + r")", re.IGNORECASE)
+_TEXT_SUBQUEUE_RE = re.compile(r"підчерга\s{0,3}(\d)\s{0,3}[.,]\s{0,3}(\d)(?!\d)(.{0,200})", re.IGNORECASE)
+_TEXT_TIME_RE = re.compile(r"(\d{1,2})[:.](\d{2})\s{0,3}[-–—]\s{0,3}(\d{1,2})[:.](\d{2})")
+_BLOCK_BREAK = "\n\x00\n"
+NOT_IN_TEXT = "Немає в текстовому графіку"
+TEXT_NOTE = "Графік взято з тексту на сайті оператора (картинки немає)"
+
+
+def _body_text(body: Node) -> str:
+    """The text of a post, a line per <br>/<p>, and a block break at every <hr>."""
+    text: list[str] = []
+    stack: list[Node | str] = [body]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            text.append(item)
+        else:
+            if item.tag == "hr":
+                text.append(_BLOCK_BREAK)
+            elif item.tag in ("br", "p", "div", "li"):
+                text.append("\n")
+            stack.extend(reversed(item.children))
+    return "".join(text)
+
+
+def _text_day(line: str, today: date) -> date | None:
+    """The schedule day a line names («на 9 листопада»), if it is today or tomorrow."""
+    for m in _TEXT_DAY_RE.finditer(line):
+        month = MONTHS.get(m[2].lower())
+        if month is None:
+            continue
+        for year in (today.year, today.year + 1):
+            try:
+                found = date(year, month, int(m[1]))
+            except ValueError:
+                continue
+            if today <= found <= today + timedelta(days=1):
+                return found
+    return None
+
+
+def _text_slots(intervals: list[tuple[int, int]]) -> list[Slot]:
+    slots = [Slot.ON] * 48
+    for start, end in intervals:
+        slots[start:end] = [Slot.OFF] * (end - start)
+    return slots
+
+
+def parse_text(markup: str, today: date) -> dict[date, Decoded]:
+    """Schedules written as text: «Підчерга 1.1 – 10:00-14:00; 22:00-24:00», by day.
+
+    Versions are separated by a rule, newest on top: the first block that names a day wins.
+    Days other than today and tomorrow are ignored (the page keeps yesterday's text for a while).
+    """
+    body = parse_html(markup).find("div", cls="post")
+    if body is None:
+        return {}
+    found: dict[date, Decoded] = {}
+    for block in _body_text(body).split(_BLOCK_BREAK):
+        day, intervals = None, {}
+        for raw in block.split("\n"):
+            line = " ".join(raw.split())
+            if not line:
+                continue
+            if m := _TEXT_SUBQUEUE_RE.search(line):
+                group = f"{m[1]}.{m[2]}"
+                if group not in GROUPS:
+                    continue
+                spans = []
+                for t in _TEXT_TIME_RE.finditer(m[3]):
+                    start = (int(t[1]) * 60 + int(t[2])) // 30
+                    end = -(-(int(t[3]) * 60 + int(t[4])) // 30)
+                    if int(t[3]) <= 24 and 0 <= start < end <= 48:
+                        spans.append((start, end))
+                intervals.setdefault(group, []).extend(spans)
+            elif day is None:
+                day = _text_day(line, today)
+        if day is None or not intervals or day in found:
+            continue
+        groups = {g: outages_from_slots(day, _text_slots(spans)) for g, spans in intervals.items()}
+        found[day] = (groups, {g: NOT_IN_TEXT for g in GROUPS if g not in groups})
+    return found
+
+
 class Khmelnytskyi(Provider):
     hosts = frozenset({"hoe.com.ua"})
     min_interval = 300
@@ -246,16 +334,23 @@ class Khmelnytskyi(Provider):
         self._decoded: dict[tuple[str, date], Decoded | str] = {}
 
     async def fetch(self, http: Fetcher, now: datetime) -> dict[date, DaySchedule]:
-        today = now.astimezone(KYIV).date()
+        moment = now.astimezone(KYIV)
+        today = moment.date()
         posts: dict[date, str] = {}
         for path, day in await asyncio.to_thread(parse_news, (await http.get(NEWS_URL)).text()):
             if today <= day <= today + timedelta(days=1):
                 posts.setdefault(day, path)  # the list is newest first
-        schedules, decoded, errors = {}, {}, []
+        schedules: dict[date, DaySchedule] = {}
+        decoded: dict[tuple[str, date], Decoded | str] = {}
+        failed: dict[date, str] = {}
         for day, path in sorted(posts.items()):
-            image, uploaded, correction = await asyncio.to_thread(parse_post, (await http.get(BASE_URL + path)).text())
+            markup = (await http.get(BASE_URL + path)).text()
+            image, uploaded, correction = await asyncio.to_thread(parse_post, markup)
             if image is None:
-                continue  # announced, the image is not there yet
+                # Announced, the image is not there yet: the post may carry the schedule as text.
+                if text := (await asyncio.to_thread(parse_text, markup, today)).get(day):
+                    schedules[day] = self._from_text(day, moment, text)
+                continue
             key = (image, day)
             if (result := self._decoded.get(key)) is None:
                 png = (await http.get(BASE_URL + image)).body
@@ -266,15 +361,29 @@ class Khmelnytskyi(Provider):
                     result = str(err)
             decoded[key] = result
             if isinstance(result, str):
-                errors.append(result)
+                if text := (await asyncio.to_thread(parse_text, markup, today)).get(day):
+                    schedules[day] = self._from_text(day, moment, text)  # the image is unreadable
+                else:
+                    failed[day] = result
                 continue
             groups, unknown = result
             notes = (correction,) if correction else ()
             schedules[day] = DaySchedule(day, uploaded, groups, unknown, notes, image_url=BASE_URL + image)
         self._decoded = decoded
-        if errors:
+        # No image for a day (no post, or nothing readable in it): the schedule page lists it as text.
+        if any(day not in schedules for day in (today, today + timedelta(days=1))):
+            page = (await http.get(QUEUES_URL, headers=_HTML)).text()
+            for day, text in (await asyncio.to_thread(parse_text, page, today)).items():
+                if day not in schedules:
+                    schedules[day] = self._from_text(day, moment, text)
+        if errors := [err for day, err in failed.items() if day not in schedules]:
             fail(errors[0])
         return schedules
+
+    @staticmethod
+    def _from_text(day: date, moment: datetime, text: Decoded) -> DaySchedule:
+        groups, unknown = text
+        return DaySchedule(day, moment, groups, unknown, (TEXT_NOTE,), image_url=None)
 
 
 #: The lookup reads the workbooks again after this long; a new version comes under a new name.
