@@ -549,6 +549,64 @@ def test_khmelnytskyi_dates_and_corrections():
         khmelnytskyi.parse_news("<html>Just a moment...</html>")
 
 
+def test_khmelnytskyi_text_since_november():
+    """Since November 2026 the hours are text: a line per subqueue with outages, none for the rest."""
+    assert khmelnytskyi.parse_news(fixture_text("khmelnytskyi_news_2026-11-14.html"))[:4] == [
+        ("/post/pogodinni-vidkljuchennja-na-15-listopada.html", date(2026, 11, 15)),
+        ("/post/prognoz-gpv-na-14-listopada.html", date(2026, 11, 14)),
+        ("/post/pogodinni-vidkljuchennja-na-13-listopada.html", date(2026, 11, 13)),
+        ("/post/prognoz-obmezhen-na-12-listopada.html", date(2026, 11, 12)),
+    ]
+    nov15 = date(2026, 11, 15)
+    groups, unknown = khmelnytskyi.parse_text(fixture_text("khmelnytskyi_post_2026-11-15.html"), nov15)
+    assert sorted(groups) == sorted(STANDARD_GROUPS) and unknown == {}
+    s = DaySchedule(nov15, None, groups)
+    assert spans(s, "1.1") == [("19:00", "22:00", False)]
+    assert spans(s, "2.1") == []  # not in the list
+    assert spans(s, "6.2") == [("22:00", "24:00", False)]
+    # Two versions: the update on top (11:00) is in force, not the first one under the <hr>.
+    nov12 = date(2026, 11, 12)
+    s = DaySchedule(nov12, None, *khmelnytskyi.parse_text(fixture_text("khmelnytskyi_post_2026-11-12.html"), nov12))
+    assert spans(s, "2.1") == [("12:00", "16:00", False), ("22:30", "24:00", False)]
+    assert spans(s, "4.1") == [("07:00", "08:30", False), ("16:00", "19:00", False)]
+
+
+def test_khmelnytskyi_text_is_not_guessed():
+    day = date(2026, 11, 15)
+
+    def post(*rows):
+        return '<div class="post"><p>Години відсутності електроенергії:</p><p>' + "<br />".join(rows) + "</p></div>"
+
+    groups, unknown = khmelnytskyi.parse_text(post("Підчерга 1.1 – 19:00-22:00.", "Підчерга 1.2 – 22:00-19:00."), day)
+    assert unknown == {"1.2": "Нерозпізнаний графік"} and "1.2" not in groups and len(groups["1.1"]) == 1
+    for rows in (
+        ("Підчерга 1.1 – 19:00-22:00. Підчерга 1.2 – 19:00-22:00.",),  # the second would get no outages
+        ("Підчерга 7.1 – 19:00-22:00.",),
+        ("Черга 1.1 – 19:00-22:00.",),  # «Години відсутності» and not one subqueue line
+    ):
+        with pytest.raises(SourceFormatError):
+            khmelnytskyi.parse_text(post(*rows), day)
+    assert khmelnytskyi.parse_text('<div class="post"><p>Графік буде згодом</p></div>', day) is None
+
+
+def test_khmelnytskyi_fetch_reads_the_newest_post_with_hours():
+    def item(path, title):
+        return (
+            f'<article class="item"><div class="heading"><a href="{path}">{title}</a></div>'
+            "<span>14 Лис 2026</span></article>"
+        )
+
+    news = item("/post/a.html", "Прогноз обмежень на 15 листопада") + item("/post/b.html", "Погодинні відключення на 15 листопада")
+    http = RoutedHttp({
+        "/post/novini-kompaniji": news,
+        "/post/a.html": '<div class="post"><p>Для промислових споживачів діятиме ГОП.</p></div>',
+        "/post/b.html": fixture_text("khmelnytskyi_post_2026-11-15.html"),
+    })  # fmt: skip
+    nov15 = date(2026, 11, 15)
+    schedules = asyncio.run(khmelnytskyi.Khmelnytskyi().fetch(http, kyiv(nov15, 9)))
+    assert list(schedules) == [nov15] and spans(schedules[nov15], "1.1") == [("19:00", "22:00", False)]
+
+
 def test_khmelnytskyi_nested_items_are_read_once():
     """Each item's text was built from its whole subtree: 200 nested items took seconds of CPU."""
     item = (

@@ -1,10 +1,15 @@
-"""Khmelnytskoblenergo: a PNG grid in a news post per schedule day on ``hoe.com.ua``.
+"""Khmelnytskoblenergo: the hours in a news post per schedule day on ``hoe.com.ua``.
 
 - The news list ``/post/novini-kompaniji`` links one post per schedule day, «Погодинні
-  відключення на 17 жовтня (ОНОВЛЕНО)», dated «17 Жов 2026» (the year comes from there).
-  Changes during the day are added to the same post, newest on top; no post means no
-  schedules are applied.
-- Each version is an image ``/Content/Uploads/YYYY/MM/fileYYYYMMDDHHMMSSmmm.png``: the name is
+  відключення на 17 жовтня (ОНОВЛЕНО)», «Прогноз ГПВ на 14 листопада» or «Прогноз обмежень на
+  12 листопада (ОНОВЛЕНО, 11:00)», dated «17 Жов 2026» (the year comes from there). Changes
+  during the day are added to the same post, newest on top; no post means no schedules are
+  applied.
+- Since November 2026 the hours are text, a line per subqueue that has outages: «Підчерга 1.1 –
+  06:00-09:00; 16:00-19:00.» A subqueue the list leaves out has none. Versions are separated by
+  ``<hr>``; the one on top is in force. A line that does not read so is not guessed at.
+- Until then each version was an image ``/Content/Uploads/YYYY/MM/fileYYYYMMDDHHMMSSmmm.png``
+  (still read, in case the site goes back to them): the name is
   its upload time in Kyiv, so the newest name is the schedule in force.
 - The image is 1920 px wide, its height varies with the template: the grid is found from the
   ink of its lines. 12 rows (1.1–6.2), 24 hourly columns, each read as two half-hours.
@@ -36,7 +41,7 @@ from urllib.parse import unquote
 from PIL import Image
 
 from ..http import Fetcher
-from ..models import KYIV, DaySchedule, Outage, Slot, outages_from_slots
+from ..models import KYIV, DaySchedule, Outage, Slot, at_minute, merge_outages, outages_from_slots
 from ._address import clean_label, natural_key, normalize_group, pick, search_term
 from ._html import Node, parse_html
 from ._image import decode_png
@@ -59,7 +64,10 @@ INSET = 5
 UNRECOGNISED = "Нерозпізнаний графік"
 
 _TITLE_RE = re.compile(
-    r"Погодинні\s{1,3}відключення\s{1,3}на\s{1,3}(\d{1,2})\s{1,3}(" + "|".join(MONTHS) + r")", re.IGNORECASE
+    r"(?:Погодинні\s{1,3}відключення|Прогноз\s{1,3}(?:ГПВ|обмежень))\s{1,3}на\s{1,3}(\d{1,2})\s{1,3}("
+    + "|".join(MONTHS)
+    + r")",
+    re.IGNORECASE,
 )
 _SHORT_MONTHS = ("січ", "лют", "бер", "кві", "тра", "чер", "лип", "сер", "вер", "жов", "лис", "гру")
 _POSTED_MONTHS = {name: number for number, name in enumerate(_SHORT_MONTHS, 1)}
@@ -67,6 +75,10 @@ _POSTED_RE = re.compile(r"(\d{1,2})\s{1,3}(" + "|".join(_SHORT_MONTHS) + r")\w{0
 _POST_PATH_RE = re.compile(r"/post/[A-Za-z0-9_-]{1,160}\.html")
 _IMAGE_RE = re.compile(r"/Content/Uploads/\d{4}/\d{2}/file(\d{17})\.png", re.IGNORECASE)
 _CORRECTION_RE = re.compile(r"підчерг", re.IGNORECASE)
+_ROW_RE = re.compile(r"підчерга\s{0,3}([1-6])\s{0,2}\.\s{0,2}([12])\.?\s{0,3}[–—-]\s{0,3}(.{1,200})", re.IGNORECASE)
+_SPAN_RE = re.compile(r"([0-2]?[0-9]):([0-5][0-9])\s{0,3}[–—-]\s{0,3}([0-2]?[0-9]):([0-5][0-9])")
+_LIST_RE = re.compile(r"\s{0,3}[;,]\s{0,3}")
+_HOURS_RE = re.compile(r"години\s{1,3}відсутності", re.IGNORECASE)
 
 Span = tuple[int, int]
 Decoded = tuple[dict[str, tuple[Outage, ...]], dict[str, str]]
@@ -100,6 +112,67 @@ def parse_news(markup: str) -> list[tuple[str, date]]:
         except ValueError:
             continue
     return posts
+
+
+def _blocks(body: Node) -> list[list[str]]:
+    """The post's text by lines, in the blocks its ``<hr>`` separate (versions, newest first)."""
+    text: list[str] = []
+    stack: list[Node | str] = [body]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            text.append(item.replace("\f", " "))
+        elif item.tag == "hr":
+            text.append("\f")
+        else:
+            if item.tag in ("br", "p", "li", "div"):
+                text.append("\n")
+            stack.extend(reversed(item.children))
+    return [[" ".join(line.split()) for line in block.split("\n") if line.strip()] for block in "".join(text).split("\f")]
+
+
+def _hours(text: str) -> list[Span] | None:
+    """«06:00-09:00; 16:00-19:00.» as minutes of the day; None unless all of it reads so."""
+    spans = []
+    for part in _LIST_RE.split(text.strip().rstrip(".").strip()):
+        if (m := _SPAN_RE.fullmatch(part)) is None:
+            return None
+        start, end = int(m[1]) * 60 + int(m[2]), int(m[3]) * 60 + int(m[4])
+        if not 0 <= start < end <= 1440:
+            return None
+        spans.append((start, end))
+    return spans
+
+
+def parse_text(markup: str, day: date) -> Decoded | None:
+    """Outages by subqueue from the newest version of the post's text; None without one.
+
+    A subqueue line whose hours do not read is unknown; a line that is not one subqueue's, or
+    «Години відсутності» with no subqueue under it, fails: the site changed the format.
+    """
+    body = parse_html(markup).find("div", cls="post")
+    if body is None:
+        fail("Khmelnytskyi: the post has no body")
+    blocks = _blocks(body)
+    for lines in blocks:
+        rows = [line for line in lines if line.lower().startswith("підчерг")]
+        if not rows:
+            continue
+        outages: dict[str, list[Outage]] = {group: [] for group in GROUPS}
+        unknown: dict[str, str] = {}
+        for row in rows:
+            # One subqueue a line: two on one line would leave the second one without outages.
+            if row.lower().count("підчерг") != 1 or (m := _ROW_RE.fullmatch(row)) is None:
+                fail(f"Khmelnytskyi: unexpected line {row[:60]!r}")
+            group = f"{m[1]}.{m[2]}"
+            if (hours := _hours(m[3])) is None:
+                unknown[group] = UNRECOGNISED
+                continue
+            outages[group].extend(Outage(at_minute(day, a), at_minute(day, b)) for a, b in hours)
+        return {g: merge_outages(o) for g, o in outages.items() if g not in unknown}, unknown
+    if any(_HOURS_RE.search(line) for lines in blocks for line in lines):
+        fail("Khmelnytskyi: the post announces the hours but lists no subqueue")
+    return None
 
 
 def parse_post(markup: str) -> tuple[str | None, datetime | None, str | None]:
@@ -237,7 +310,7 @@ def parse_image(png: bytes, day: date) -> Decoded:
 class Khmelnytskyi(Provider):
     hosts = frozenset({"hoe.com.ua"})
     min_interval = 300
-    kind = Kind.PICTURE
+    kind = Kind.PAGE
     page = NEWS_URL
 
     def __init__(self) -> None:
@@ -247,30 +320,43 @@ class Khmelnytskyi(Provider):
 
     async def fetch(self, http: Fetcher, now: datetime) -> dict[date, DaySchedule]:
         today = now.astimezone(KYIV).date()
-        posts: dict[date, str] = {}
+        posts: dict[date, list[str]] = {}
         for path, day in await asyncio.to_thread(parse_news, (await http.get(NEWS_URL)).text()):
             if today <= day <= today + timedelta(days=1):
-                posts.setdefault(day, path)  # the list is newest first
+                posts.setdefault(day, []).append(path)  # the list is newest first
         schedules, decoded, errors = {}, {}, []
-        for day, path in sorted(posts.items()):
-            image, uploaded, correction = await asyncio.to_thread(parse_post, (await http.get(BASE_URL + path)).text())
-            if image is None:
-                continue  # announced, the image is not there yet
-            key = (image, day)
-            if (result := self._decoded.get(key)) is None:
-                png = (await http.get(BASE_URL + image)).body
+        for day, paths in sorted(posts.items()):
+            # The newest post with the hours: a newer one may only announce them, or be about
+            # the limits for industry («Прогноз обмежень»).
+            for path in paths:
+                markup = (await http.get(BASE_URL + path)).text()
                 try:
-                    result = await asyncio.to_thread(parse_image, png, day)
+                    text = await asyncio.to_thread(parse_text, markup, day)
                 except SourceFormatError as err:
-                    # The message only: the exception's traceback holds the decoder's frames.
-                    result = str(err)
-            decoded[key] = result
-            if isinstance(result, str):
-                errors.append(result)
-                continue
-            groups, unknown = result
-            notes = (correction,) if correction else ()
-            schedules[day] = DaySchedule(day, uploaded, groups, unknown, notes, image_url=BASE_URL + image)
+                    errors.append(str(err))
+                    break
+                if text is not None:
+                    schedules[day] = DaySchedule(day, None, *text)
+                    break
+                image, uploaded, correction = await asyncio.to_thread(parse_post, markup)
+                if image is None:
+                    continue  # announced, the hours are not there yet
+                key = (image, day)
+                if (result := self._decoded.get(key)) is None:
+                    png = (await http.get(BASE_URL + image)).body
+                    try:
+                        result = await asyncio.to_thread(parse_image, png, day)
+                    except SourceFormatError as err:
+                        # The message only: the exception's traceback holds the decoder's frames.
+                        result = str(err)
+                decoded[key] = result
+                if isinstance(result, str):
+                    errors.append(result)
+                    break
+                groups, unknown = result
+                notes = (correction,) if correction else ()
+                schedules[day] = DaySchedule(day, uploaded, groups, unknown, notes, image_url=BASE_URL + image)
+                break
         self._decoded = decoded
         if errors:
             fail(errors[0])
