@@ -44,7 +44,6 @@ ADDRESSES = {
     "poltava-oe": ["Полтавська об", "Полтава", "Соборності", "10"],
     "zhytomyr-oe": ["Житомирський", "Житомир", "Київська", "5"],
     "ternopil-oe": ["Тернопіль", "Руська", "1"],
-    "vinnytsia-oe": ["Вінниця", "Магістратська", "2"],  # the oblenergo's own office
     "khmelnytskyi-oe": ["Хмельницький", "Храновського", "11А"],  # the oblenergo's own office
 }
 
@@ -113,8 +112,10 @@ def test_source(operator, source):
         schedules = twice(fetch)
     except SourceBlocked as err:
         # Bot protection on GitHub's IPs comes and goes; it says nothing about the format,
-        # and the bot falls back to the operator's next source when it happens.
-        if ABROAD:
+        # and the bot falls back to the operator's next source when it happens. A fallback
+        # behind it is no news either: we never get around it, and the status check says when
+        # the operator's primary source is down too.
+        if ABROAD or source is not operator.sources[0]:
             pytest.skip(f"blocked by the site's bot protection: {err}")
         raise
     unknown_groups = set()

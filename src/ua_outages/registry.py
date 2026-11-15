@@ -23,7 +23,6 @@ from .providers.prykarpattia import Prykarpattia
 from .providers.rivne import Rivne
 from .providers.sumy_news import SumyNews
 from .providers.ternopil import Ternopil, TernopilLookup
-from .providers.vinnytsia import Vinnytsia, VinnytsiaLookup
 from .providers.volyn import Volyn
 from .providers.yasno import Yasno, YasnoLookup
 from .providers.zakarpattia import Zakarpattia
@@ -99,12 +98,11 @@ OPERATORS: tuple[Operator, ...] = (
         sources=(OutageDataUa("kyiv-region"),),
     ),
     Operator(
-        "vinnytsia-oe", "Вінницяобленерго", "vinnytska", "https://www.voe.com.ua/disconnection/detailed",
-        sources=(Vinnytsia(),),
-        lookup=VinnytsiaLookup(),
-        note="Вінницяобленерго показує графік лише для конкретної адреси, тож бот підписує за адресою: "
-        "знайдіть свій будинок, і бот стежитиме за чергою цієї адреси. Чергу сайт показує, лише коли "
-        "діють графіки погодинних відключень.",
+        # Since 28.10.2026 /disconnection/detailed (providers/vinnytsia.py, kept in case it comes
+        # back) redirects here, behind a Cloudflare challenge: not for us to get around.
+        "vinnytsia-oe", "Вінницяобленерго", "vinnytska", "https://disconnection.voe.com.ua/",
+        note="Вінницяобленерго показує графік лише на своєму сайті disconnection.voe.com.ua, закритому від "
+        "автоматичних запитів, тож бот не може його отримати. Перевірити свою чергу можна на сайті оператора.",
     ),
     Operator(
         "volyn-oe", "Волиньобленерго", "volynska",

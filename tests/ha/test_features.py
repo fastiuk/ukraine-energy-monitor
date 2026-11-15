@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
@@ -151,6 +152,19 @@ async def test_removing_the_last_entry_removes_its_issues(kyiv_hass, freezer, mo
     ir.async_create_issue(hass, DOMAIN, f"source_unavailable_{OPERATOR}", is_fixable=False, severity=ir.IssueSeverity.WARNING, translation_key="source_unavailable")
     assert await hass.config_entries.async_remove(config_entry.entry_id)
     assert ir.async_get(hass).async_get_issue(DOMAIN, f"source_unavailable_{OPERATOR}") is None
+
+
+async def test_an_operator_without_sources_says_why(kyiv_hass) -> None:
+    """Vinnytsia lost its only source (11.2026): an entry made before says why, not a traceback."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Вінниця, вул. Соборна, 1 · черга 1.1",
+        data={CONF_OPERATOR: "vinnytsia-oe", CONF_GROUP: "1.1", CONF_ADDRESS: "1/2/3", CONF_ADDRESS_LABEL: "Вінниця, вул. Соборна, 1"},
+        unique_id="vinnytsia-oe:1/2/3",
+    )
+    entry.add_to_hass(kyiv_hass)
+    assert not await kyiv_hass.config_entries.async_setup(entry.entry_id)
+    assert entry.state is ConfigEntryState.SETUP_ERROR and "disconnection.voe.com.ua" in entry.reason
 
 
 async def test_card_data(kyiv_hass, freezer, mock_fetch, config_entry, hass_ws_client) -> None:

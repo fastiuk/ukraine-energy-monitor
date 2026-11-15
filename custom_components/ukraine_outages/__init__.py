@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.typing import ConfigType
@@ -39,6 +40,10 @@ async def get_hub(hass: HomeAssistant) -> SourceHub:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: OutagesConfigEntry) -> bool:
+    # An operator can lose its last source (Vinnytsia, 2026-11): say why instead of a traceback.
+    op = find_operator(entry.data[CONF_OPERATOR])
+    if op is not None and not op.available:
+        raise ConfigEntryError(f"{op.name}: {op.note or 'графіки недоступні'}")
     coordinator = OutageCoordinator(hass, entry, await get_hub(hass))
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator

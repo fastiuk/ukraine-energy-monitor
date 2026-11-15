@@ -1,5 +1,8 @@
 """Vinnytsiaoblenergo: the hourly table of one address on ``https://www.voe.com.ua/disconnection/detailed``.
 
+Not in the registry since November 2026: on 28.10.2026 the page began to redirect to
+``disconnection.voe.com.ua``, behind a Cloudflare challenge. Kept in case the form comes back.
+
 The page is a Drupal form that the site fills from three open autocompletes. Submitting it is a
 plain POST of the form every visitor gets (no captcha element on it, no cookies needed)::
 
