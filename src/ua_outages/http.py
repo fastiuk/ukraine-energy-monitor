@@ -78,8 +78,20 @@ def _charset(name: str | None) -> str:
     return codec if codec in CHARSETS else "utf-8"
 
 
+#: A connection closed under a request before any answer came (the reset error is aiohttp 3.10+).
+_DROPPED: tuple[type[Exception], ...] = tuple(
+    error
+    for error in (aiohttp.ServerDisconnectedError, getattr(aiohttp, "ClientConnectionResetError", None))
+    if error is not None
+)
+
+
 class FetchError(Exception):
     """A source could not be fetched or did not look like what we expect."""
+
+
+class SourceBlocked(FetchError):
+    """The site's bot protection (Imperva, Cloudflare) refused the request."""
 
 
 @dataclass(frozen=True)
@@ -155,6 +167,17 @@ class Fetcher:
     ) -> Response:
         return await self.request("POST", url, params=params, data=data, headers=headers)
 
+    async def _open(self, method: str, target: URL, **options: Any) -> aiohttp.ClientResponse:
+        """The response to a request, sent once more on a fresh connection when a GET finds the
+        kept-alive one closed by the server ("Cannot write to closing transport"): a site that
+        drops idle connections must not look down for it."""
+        try:
+            return await self._session.request(method, target, **options)
+        except _DROPPED:
+            if method != "GET":
+                raise
+            return await self._session.request(method, target, **options)
+
     async def request(
         self,
         method: str,
@@ -170,7 +193,7 @@ class Fetcher:
             if not self.allowed(target):
                 raise FetchError(f"Refusing to fetch {target.scheme}://{target.host}: host not allowed")
             try:
-                async with self._session.request(
+                resp = await self._open(
                     method,
                     target,
                     params=params,
@@ -179,7 +202,11 @@ class Fetcher:
                     timeout=self._timeout,
                     allow_redirects=False,
                     ssl=self._ssl,
-                ) as resp:
+                )
+                async with resp:
+                    if resp.headers.get("cf-mitigated") == "challenge":
+                        # A page for browsers to solve, not an answer: we never get around it.
+                        raise SourceBlocked(f"{method} {resp.url}: HTTP {resp.status}, a Cloudflare challenge")
                     if resp.status in _REDIRECTS and "Location" in resp.headers:
                         target = resp.url.join(URL(resp.headers["Location"]))
                         params = None  # already part of the URL we were sent to

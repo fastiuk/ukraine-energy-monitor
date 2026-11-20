@@ -241,6 +241,35 @@ def test_kharkiv():
     assert kharkiv.parse_feed(fixture_text("kharkiv_rss.xml"), OCT18) == {}
 
 
+
+def test_kharkiv_telegram():
+    nov19, nov20 = date(2026, 11, 19), date(2026, 11, 20)
+    page = fixture_text("kharkiv_tg.html")
+    schedules = kharkiv.parse_channel(page, nov19)
+    assert list(schedules) == [nov19, nov20]  # the 18th's post is past; news and notices are no schedules
+    s = schedules[nov20]
+    assert s.updated_at == datetime(2026, 11, 19, 23, 12, 26, tzinfo=KYIV) and sorted(s.groups) == sorted(STANDARD_GROUPS) and not s.unknown
+    assert spans(s, "1.1") == [("00:00", "03:00", False), ("10:00", "13:30", False), ("17:00", "24:00", False)]
+    assert spans(s, "6.1") == [("06:30", "10:00", False), ("17:00", "20:30", False)]  # "17:00:20:30" in the post
+    assert spans(schedules[nov19], "2.1") == [("02:30", "06:00", False), ("13:00", "16:30", False)]
+    assert list(kharkiv.parse_channel(page, nov20)) == [nov20]
+    with pytest.raises(SourceFormatError, match="not a Telegram channel preview"):
+        kharkiv.parse_channel("<html><body>Just a moment...</body></html>", nov20)
+
+
+def test_kharkiv_text():
+    nov21 = date(2026, 11, 21)
+    published = kyiv(date(2026, 11, 20), 21)
+    announced = "у суботу, 21 листопада, з 00:00 до 24:00 у Харківській області будуть діяти графіки погодинних відключень (ГПВ)."
+    s = kharkiv.parse_text(announced, f"{announced}\n1.1 08:00-10:00\n1.2 08:00-10:00 20:30\n6.2 08:00-10:00", published, nov21)
+    # A time outside any span is not dropped: the group is left as it is written.
+    assert s.unknown == {"1.2": "1.2 08:00-10:00 20:30"} and spans(s, "1.1") == [("08:00", "10:00", False)]
+    off = "21 листопада графіки погодинних відключень не застосовуватимуться"
+    assert kharkiv.parse_text(off, off, published, nov21).groups == dict.fromkeys(STANDARD_GROUPS, ())
+    business = "21 листопада діятимуть графіки погодинних відключень для промисловості (ГОП)"
+    assert kharkiv.parse_text(business, business + "\n1.1 08:00-10:00", published, nov21) is None
+    assert kharkiv.KharkivTelegram().name == "Telegram kharkivenergy"
+
 def test_zaporizhzhia():
     schedules = zaporizhzhia.parse(fixture_text("zaporizhzhia.html"), OCT17)
     s = schedules[OCT17]  # the newest update (18:52), not the earlier ones
@@ -772,26 +801,115 @@ def test_chernihiv_hostile_posts():
         assert list(schedules) == [OCT17] and schedules[OCT17].image_url.endswith("/1")
 
 
-def test_zakarpattia_watches_for_a_schedule():
-    def options(today="", tomorrow=""):
+# Zakarpattia: the operator's image of 20.11.2026 and copies of it edited as the cases need.
+NOV20, NOV21 = date(2026, 11, 20), date(2026, 11, 21)
+ZAKARPATTIA_PNG = (FIXTURES / "zakarpattia_2026-11-20.png").read_bytes()
+#: The title's date: the "0" of "20" and the "1" after the first dot (x0, top, x1, bottom).
+ZAK_ZERO, ZAK_ONE = (1326, 22, 1334, 38), (1339, 22, 1347, 38)
+
+
+def zakarpattia_png(edit=None) -> bytes:
+    image = Image.open(io.BytesIO(ZAKARPATTIA_PNG)).convert("RGB")
+    if edit:
+        edit(image, ImageDraw.Draw(image))
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return out.getvalue()
+
+
+def zakarpattia_tomorrow(image, draw):
+    """«на 21.11.2026р.»: the "1" pasted over the "0"."""
+    one = image.crop(ZAK_ONE)
+    draw.rectangle(ZAK_ZERO, fill="white")
+    image.paste(one, ZAK_ZERO[:2])
+
+
+def zakarpattia_day(png: bytes) -> DaySchedule:
+    day, (groups, unknown) = zakarpattia.parse_image(png)
+    return DaySchedule(day, groups=groups, unknown=unknown)
+
+
+def test_zakarpattia_image():
+    s = zakarpattia_day(ZAKARPATTIA_PNG)
+    assert s.day == NOV20 and sorted(s.groups) == sorted(STANDARD_GROUPS) and not s.unknown
+    # As the dispatcher's log for the day says: 1.x and 4.x off at 08:20, 2.x at 10:30, 5.x at 11:30.
+    assert spans(s, "1.1") == spans(s, "1.2") == [("08:30", "11:30", False), ("16:00", "20:30", False)]
+    assert spans(s, "2.2") == [("10:30", "14:30", False), ("19:00", "23:30", False)]
+    assert spans(s, "3.1") == [("13:00", "17:30", False), ("23:30", "24:00", False)]
+    assert spans(s, "4.2") == [("08:30", "13:00", False), ("17:30", "22:00", False)]
+    assert spans(s, "5.1") == [("11:30", "16:00", False), ("20:30", "24:00", False)]
+    assert spans(s, "6.2") == [("14:30", "19:00", False), ("22:00", "24:00", False)]
+
+
+def test_zakarpattia_day_is_read_from_the_title():
+    assert zakarpattia_day(zakarpattia_png(zakarpattia_tomorrow)).day == NOV21
+    with pytest.raises(SourceFormatError, match="no date"):
+        zakarpattia.parse_image(zakarpattia_png(lambda image, draw: draw.rectangle((1300, 20, 1420, 40), fill="white")))
+    # A digit like none of the header's (the "0" filled in): never a guess.
+    smudge = lambda image, draw: draw.rectangle((1328, 26, 1330, 33), fill="black")  # noqa: E731
+    with pytest.raises(SourceFormatError, match="not readable"):
+        zakarpattia.parse_image(zakarpattia_png(smudge))
+
+
+def test_zakarpattia_unknown_colour():
+    grey = lambda image, draw: draw.rectangle((210, 200, 270, 215), fill=(128, 128, 128))  # noqa: E731
+    s = zakarpattia_day(zakarpattia_png(grey))  # 00:00–01:00 of 2.1
+    assert s.unknown == {"2.1": zakarpattia.UNRECOGNISED} and len(s.groups) == 11
+
+
+@pytest.mark.parametrize(
+    "edit, error",
+    [
+        (lambda image, draw: draw.rectangle((0, 0, 2020, 530), fill="white"), "table columns"),
+        # 1-2 painted green: two subqueues of a queue have one colour, queues their own.
+        (lambda image, draw: draw.rectangle((106, 158, 194, 184), fill=(148, 207, 81)), "one per queue"),
+        (lambda image, draw: draw.rectangle((106, 158, 194, 184), fill="white"), "12 subqueue rows"),
+    ],
+)
+def test_zakarpattia_unexpected_tables(edit, error):
+    with pytest.raises(SourceFormatError, match=error):
+        zakarpattia.parse_image(zakarpattia_png(edit))
+
+
+def test_zakarpattia_image_size_is_checked_first():
+    with pytest.raises(SourceFormatError, match="2020×5000, expected 1000–3000×260–1000"):
+        zakarpattia.parse_image(_png_header(2020, 5000))
+
+
+def test_zakarpattia_fetch():
+    base, today, tomorrow = zakarpattia.BASE_URL, "/media/2026/11/today_GPV.png", "/media/2026/11/tomorrow_GPV.png"
+
+    def options(today_path, tomorrow_path, today_set="2026-11-20T10:10:33+00:00", tomorrow_set="2026-11-20T18:40:00+00:00"):
         return {"hydra:member": [
             {"option_key": "successful_last_synk", "value": ""},
-            {"option_key": "pw_gpv_image_today", "value": today},
-            {"option_key": "pw_gpv_image_tomorrow", "value": tomorrow},
+            {"option_key": "pw_gpv_image_today", "value": today_path, "date": today_set},
+            {"option_key": "pw_gpv_image_tomorrow", "value": tomorrow_path, "date": tomorrow_set},
         ]}  # fmt: skip
 
-    async def fetch(payload):
-        class Http:
-            async def get(self, url, *, headers=None):
-                assert url.startswith(zakarpattia.BASE_URL + "/api/options?")
-                return SimpleNamespace(json=lambda: payload)
+    images = {base + today: ZAKARPATTIA_PNG, base + tomorrow: zakarpattia_png(zakarpattia_tomorrow)}
+    source = zakarpattia.Zakarpattia()
+    http = FakeHttp({f"{base}/api/options": options(today, tomorrow), **images})
+    schedules = asyncio.run(source.fetch(http, kyiv(NOV20, 19)))
+    assert list(schedules) == [NOV20, NOV21]
+    assert schedules[NOV20].updated_at == datetime(2026, 11, 20, 10, 10, 33, tzinfo=KYIV)  # Kyiv time labelled UTC
+    assert schedules[NOV21].image_url == base + tomorrow and spans(schedules[NOV21], "1.1")[0] == ("08:30", "11:30", False)
+    assert http.calls[0][0].endswith("?option_key[]=pw_gpv_image_today&option_key[]=pw_gpv_image_tomorrow")
 
-        return await zakarpattia.Zakarpattia().fetch(Http(), kyiv(OCT18, 9))
+    # Seen images are not downloaded again; the 20th's, still in "today" on the 21st, is past.
+    http = FakeHttp({f"{base}/api/options": options(today, tomorrow), **images})
+    assert list(asyncio.run(source.fetch(http, kyiv(NOV21, 9)))) == [NOV21]
+    assert len(http.calls) == 1
 
-    assert asyncio.run(fetch(options())) == {}  # not applied: nothing published
-    # An image means schedules are applied, in a format nobody has seen: fail loudly, never guess.
-    with pytest.raises(SourceFormatError, match="format is not known"):
-        asyncio.run(fetch(options(tomorrow="/media/2026/10/abc_GPV.png")))
-    for hostile in ({"hydra:member": []}, ["x"], options(today="https://evil.example/a.png")):
+    # Tomorrow's image put in "today" late in the evening is still tomorrow's.
+    late = options(tomorrow, "", today_set="2026-11-20T22:10:00+00:00")
+    assert list(asyncio.run(source.fetch(FakeHttp({f"{base}/api/options": late, **images}), kyiv(NOV20, 22, 15)))) == [NOV21]
+    # One day in both slots: the one set last.
+    again = "/media/2026/11/again_GPV.png"
+    both = options(today, again, tomorrow_set="2026-11-20T12:00:00+00:00")
+    http = FakeHttp({f"{base}/api/options": both, **images, base + again: ZAKARPATTIA_PNG})
+    assert asyncio.run(zakarpattia.Zakarpattia().fetch(http, kyiv(NOV20, 13)))[NOV20].image_url == base + again
+
+    assert asyncio.run(source.fetch(FakeHttp({f"{base}/api/options": options("", "")}), kyiv(NOV20, 9))) == {}
+    for hostile in ({"hydra:member": []}, ["x"], options("https://evil.example/a.png", "")):
         with pytest.raises(SourceFormatError):
-            asyncio.run(fetch(hostile))
+            asyncio.run(source.fetch(FakeHttp({f"{base}/api/options": hostile}), kyiv(NOV20, 9)))

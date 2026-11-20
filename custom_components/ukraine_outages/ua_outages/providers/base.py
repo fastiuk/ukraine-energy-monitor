@@ -11,6 +11,7 @@ from enum import StrEnum
 from typing import ClassVar, NoReturn
 
 from ..http import MAX_BYTES, FetchError, Fetcher
+from ..http import SourceBlocked as SourceBlocked  # defined there: the fetcher recognises Cloudflare's
 from ..models import DaySchedule
 
 # Only a plain path on the source's host; "@evil.example/x" or "//evil.example" would change the host.
@@ -19,10 +20,6 @@ _PLAIN_PATH_RE = re.compile(r"/[A-Za-z0-9_.-][A-Za-z0-9_./-]{0,299}")
 
 class SourceFormatError(FetchError):
     """The source answered, but not in the format we parse."""
-
-
-class SourceBlocked(FetchError):
-    """The site's bot protection (Imperva, Cloudflare) refused the request."""
 
 
 class NotApplied(FetchError):
@@ -107,6 +104,9 @@ class AddressSource(Provider):
 
     #: Pause between requests for different addresses, in seconds.
     request_gap: ClassVar[float] = 1.0
+    #: The key of a public address to poll while no one has asked for any, so that whether the
+    #: source works is known before the first subscriber.
+    probe: ClassVar[str | None] = None
 
     async def fetch(self, http: Fetcher, now: datetime) -> dict[date, DaySchedule]:
         return {}

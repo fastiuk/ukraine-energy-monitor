@@ -35,7 +35,7 @@ from PIL import Image
 
 from ..http import Fetcher
 from ..models import KYIV, DaySchedule, Outage, Slot, outages_from_slots
-from ._image import decode_png
+from ._image import decode_png, runs
 from .base import Kind, Provider, fail, url_on_host
 
 log = logging.getLogger(__name__)
@@ -125,19 +125,6 @@ def parse_archive(payload: Any) -> dict[str, Version]:
     return versions
 
 
-def _runs(flags: Sequence[bool]) -> list[Span]:
-    runs, start = [], None
-    for i, flag in enumerate(flags):
-        if flag and start is None:
-            start = i
-        elif not flag and start is not None:
-            runs.append((start, i))
-            start = None
-    if start is not None:
-        runs.append((start, len(flags)))
-    return runs
-
-
 def _even(spans: Sequence[Span], what: str) -> None:
     """Fail unless the spans have about the same size and follow each other closely."""
     sizes = [end - start for start, end in spans]
@@ -158,7 +145,7 @@ def locate_grid(image: Image.Image) -> tuple[list[Span], list[list[Span]]]:
     # Columns: cells are table colour from top to bottom of both grids, the lines between
     # them are white, so per-column ink counts separate them whatever the schedule says.
     counts = [sum(ink[x::width]) for x in range(width)]
-    columns = _runs([count > max(counts) // 2 for count in counts])
+    columns = runs([count > max(counts) // 2 for count in counts])
     if len(columns) != COLUMNS + 2:  # "Черга", "Підчерга", then the time columns
         fail(f"Volyn: expected {COLUMNS + 2} table columns, found {len(columns)}")
     label, columns = columns[1], columns[2:]
@@ -167,7 +154,7 @@ def locate_grid(image: Image.Image) -> tuple[list[Span], list[list[Span]]]:
     # Rows: inked at the left edge of the "Підчерга" cell and of every time cell. The
     # merged "Черга" cells have no line between subqueues, so that column is left out.
     xs = [label[0] + EDGE] + [left + EDGE for left, _ in columns]
-    bands = _runs([all(ink[y * width + x] for x in xs) for y in range(height)])
+    bands = runs([all(ink[y * width + x] for x in xs) for y in range(height)])
     if len(bands) != 2 * (1 + len(GROUPS)):
         fail(f"Volyn: expected two grids of {1 + len(GROUPS)} rows, found {len(bands)} rows")
     halves = []

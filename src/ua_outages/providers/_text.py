@@ -27,9 +27,12 @@ _BLOCK_TAG_RE = re.compile(
 )
 _TAG_RE = re.compile(r"<[^<>]{0,1000}>")
 _SPACE_RE = re.compile(r"[ \t  ]+")
+#: "07:00-10:30", "07.00 – 10.30", "з 07:00 до 10:30"; and "17:00:20:30", a typo for a span (Kharkiv,
+#: 20.11.2026) that no other reading fits.
 INTERVAL_RE = re.compile(
-    r"(?<!\d)(\d{1,2})[:.](\d{2})\s{0,3}(?:-|–|—|до|по)\s{0,3}(\d{1,2})[:.](\d{2})(?!\d)"
+    r"(?<!\d)(\d{1,2})[:.](\d{2})\s{0,3}(?:-|–|—|до|по|:)\s{0,3}(\d{1,2})[:.](\d{2})(?!\d)"
 )
+_TIME_RE = re.compile(r"(?<!\d)\d{1,2}[:.]\d{2}(?!\d)")
 _DAY_MONTH_RE = re.compile(r"(?<!\d)(\d{1,2})\s{1,3}(" + "|".join(MONTHS) + r")", re.IGNORECASE)
 
 
@@ -97,12 +100,13 @@ NO_OUTAGES_RE = re.compile(
 
 
 def parse_group_text(
-    day: date, text: str
+    day: date, text: str, *, strict: bool = False
 ) -> tuple[dict[str, tuple[Outage, ...]], dict[str, str]]:
     """Groups and their outages from "1.1 07:00-10:30; 17:30-21:00\\n1.2: 09:30 – 13:30 …".
 
     A group's text runs to the next group or the end of its line. Returns parsed groups and
-    the raw text of groups that could not be parsed.
+    the raw text of groups that could not be parsed: with ``strict``, also of those whose text
+    holds a time that is not part of a span ("17:00 20:30"), instead of reading them in part.
     """
     groups: dict[str, tuple[Outage, ...]] = {}
     unknown: dict[str, str] = {}
@@ -115,6 +119,8 @@ def parse_group_text(
         outages = parse_intervals(day, segment)
         if outages is None and NO_OUTAGES_RE.search(segment):
             outages = ()
+        if strict and _TIME_RE.search(INTERVAL_RE.sub("", segment)):
+            outages = None
         groups.pop(group, None)
         unknown.pop(group, None)
         if outages is None:

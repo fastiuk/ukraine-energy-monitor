@@ -12,7 +12,7 @@ from .providers.cherkasy import Cherkasy
 from .providers.chernihiv import Chernihiv
 from .providers.chernivtsi import Chernivtsi
 from .providers.dtek import DtekPage, OutageDataUa, cek_groups
-from .providers.kharkiv import Kharkiv
+from .providers.kharkiv import Kharkiv, KharkivTelegram
 from .providers.khmelnytskyi import Khmelnytskyi, KhmelnytskyiLookup
 from .providers.kirovohrad import CHANNELS as KIROVOHRAD_CHANNELS
 from .providers.kirovohrad import Kirovohrad
@@ -189,7 +189,8 @@ OPERATORS: tuple[Operator, ...] = (
     ),
     Operator(
         "kharkiv-oe", "Харківобленерго", "kharkivska", "https://oblenergo.kharkiv.ua/uk/media_centre/news",
-        sources=(Kharkiv(),),
+        # The site answers mostly with a Cloudflare challenge since 16.11.2026: its feed is the fallback.
+        sources=(KharkivTelegram(), Kharkiv()),
     ),
     Operator(
         "kherson-oe", "Херсонобленерго", "khersonska", "https://ksoe.com.ua",

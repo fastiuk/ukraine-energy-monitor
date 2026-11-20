@@ -102,6 +102,7 @@ class Ternopil(AddressSource):
     min_interval = 300
     request_gap = 1.0
     kind = Kind.API
+    probe = "1032/10035/1"  # Тернопіль, вул. Руська, 1: the example the address lookup shows
 
     def valid_address(self, address: str) -> bool:
         return isinstance(address, str) and _ADDRESS_RE.fullmatch(address) is not None

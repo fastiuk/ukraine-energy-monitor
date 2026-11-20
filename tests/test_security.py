@@ -13,7 +13,7 @@ from aiohttp import web
 from conftest import MAIN_NS, fixture_json, workbook
 from multidict import CIMultiDict
 
-from ua_outages.http import FetchError, Fetcher, Response, Throttle, forbidden_host, ssl_context
+from ua_outages.http import FetchError, Fetcher, Response, SourceBlocked, Throttle, forbidden_host, ssl_context
 from ua_outages.providers import kharkiv, mykolaiv, ternopil, yasno
 from ua_outages.providers._html import MAX_NODES, TooManyNodes, parse_html
 from ua_outages.providers._text import MAX_TEXT, find_day, html_lines, parse_group_text, parse_intervals, plain_text
@@ -184,6 +184,60 @@ def test_fetcher_follows_redirects_on_the_same_host():
     resp = asyncio.run(_serve(handler, lambda f, base: f.get(base + "/old")))
     assert resp.text() == "ok" and resp.url.endswith("/new")
 
+
+
+def test_fetcher_retries_a_get_once_on_a_dropped_connection():
+    """A kept-alive connection the site has closed fails the write ("Cannot write to closing
+    transport", Khmelnytskyi), which aiohttp does not retry: one such drop is not an outage."""
+
+    class Body:
+        async def iter_chunked(self, size):
+            yield b"ok"
+
+    class Answer:
+        status, headers, url, charset, content = 200, {}, "https://example.com/x", "utf-8", Body()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+    class Session:
+        def __init__(self, drops):
+            self.drops, self.calls = drops, []
+
+        async def request(self, method, url, **options):
+            self.calls.append(method)
+            if len(self.calls) <= self.drops:
+                raise aiohttp.ClientConnectionResetError("Cannot write to closing transport")
+            return Answer()
+
+    def run(session, method):
+        fetcher = Fetcher(session, ["example.com"])
+        return asyncio.run(fetcher.request(method, "https://example.com/x"))
+
+    once = Session(drops=1)
+    assert run(once, "GET").text() == "ok" and once.calls == ["GET", "GET"]
+    twice = Session(drops=2)
+    with pytest.raises(FetchError, match="closing transport"):
+        run(twice, "GET")
+    assert twice.calls == ["GET", "GET"]
+    post = Session(drops=1)  # a POST may have been acted on: never sent twice
+    with pytest.raises(FetchError, match="closing transport"):
+        run(post, "POST")
+    assert post.calls == ["POST"]
+
+
+
+def test_a_cloudflare_challenge_is_a_blocked_source():
+    """Kharkiv's site since 16.11.2026: a page for browsers to solve, never worked around."""
+
+    async def handler(request):
+        return web.Response(status=403, text="<title>Just a moment...</title>", headers={"cf-mitigated": "challenge"})
+
+    with pytest.raises(SourceBlocked, match="HTTP 403, a Cloudflare challenge"):
+        asyncio.run(_serve(handler, lambda f, base: f.get(base + "/uk/rss.xml")))
 
 def test_fetcher_rejects_oversized_bodies():
     async def handler(request):
