@@ -26,7 +26,7 @@ from ua_outages.providers._address import (
 )
 from ua_outages.providers.base import SourceFormatError
 from ua_outages.providers.khmelnytskyi import KhmelnytskyiLookup, houses, resolution, split_houses
-from ua_outages.providers.loe import LoeLookup
+from ua_outages.providers.loe import LoeLookup, parse_cities
 from ua_outages.providers.mykolaiv import MykolaivLookup
 from ua_outages.providers.poltava import PoltavaLookup
 from ua_outages.providers.zhytomyr import ZhytomyrLookup
@@ -161,6 +161,42 @@ def test_loe_lookup():
     assert seven.groups == ("2.1",) and seven.other == ("Не входить",)
     with pytest.raises(ValueError):
         run(lookup.resolve(http, ["693", "12446", "999"]))
+
+
+def jsonld(fixture, kind, hydra=True):
+    """A directory's answer as an API Platform JSON-LD collection, as LOE's cache served it on 20.11.2026."""
+    members = [{"@id": f"/api/{kind}/{m.get('id', n)}", "@type": kind, **m} for n, m in enumerate(json.loads(address_fixture(fixture)))]
+    if hydra:
+        return json.dumps({"@context": f"/api/contexts/{kind}", "@type": "hydra:Collection",
+                           "hydra:totalItems": len(members), "hydra:member": members})
+    return json.dumps({"@context": f"/api/contexts/{kind}", "@type": "Collection", "totalItems": len(members), "member": members})
+
+
+@pytest.mark.parametrize("hydra", [True, False])
+def test_loe_lookup_reads_a_jsonld_collection(hydra):
+    lookup = LoeLookup()
+    http = FakeHttp(
+        {
+            "/pw_cities": jsonld("loe_cities.json", "PwCity", hydra),
+            "/pw_streets": jsonld("loe_streets.json", "PwStreet", hydra),
+            "/pw_accounts": jsonld("loe_accounts.json", "PwAccount", hydra),
+        }
+    )
+    assert run(lookup.options(http, [], "Львів"))[0] == Choice("693", "Львів (Львівська громада)")
+    assert run(lookup.options(http, ["693"], "Наукова"))[0] == Choice("12446", "Наукова")
+    assert run(lookup.resolve(http, ["693", "12446", "34"])).groups == ("3.1", "5.2")
+
+
+def test_a_directory_answer_must_still_be_a_list():
+    for broken in (
+        {"hydra:member": [{"id": 1, "name": "Львів"}]},  # not a collection
+        {"@type": "hydra:Collection", "hydra:member": "Львів"},
+        {"@type": "hydra:Collection"},
+        {"@type": "Collection", "member": {"id": 1}},
+        {"@type": "hydra:Collection", "hydra:member": [{}] * 50_001},
+    ):
+        with pytest.raises(SourceFormatError):
+            parse_cities(broken)
 
 
 def test_mykolaiv_lookup():

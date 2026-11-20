@@ -20,6 +20,8 @@ MAX_LABEL = 80
 MAX_QUERY = 60
 #: Entries in one directory response; real lists have a few thousand at most.
 MAX_ENTRIES = 50_000
+#: JSON-LD collection types of API Platform (with and without the hydra prefix).
+_COLLECTIONS = ("hydra:Collection", "Collection")
 
 # Control characters, soft hyphen, zero-width and bidi controls: invisible or reordering text.
 _INVISIBLE_RE = re.compile("[\x00-\x1f\x7f-\x9f­​-‏ -‮⁠-⁯﻿]")
@@ -93,9 +95,15 @@ def normalize_group(value: Any) -> str | None:
 
 
 def entries(payload: Any, what: str, key: str | None = None) -> list[Any]:
-    """The list a directory answered with (optionally under ``key``), bounded in size."""
+    """The list a directory answered with (optionally under ``key``), bounded in size.
+
+    An API Platform directory (LOE, Ternopil) may answer with a JSON-LD collection even when asked
+    for plain JSON: its cache keeps one variant per address. The collection's members are the list.
+    """
     if key is not None:
         payload = payload.get(key) if isinstance(payload, dict) else None
+    elif isinstance(payload, dict) and payload.get("@type") in _COLLECTIONS:
+        payload = payload.get("hydra:member", payload.get("member"))
     if not isinstance(payload, list) or len(payload) > MAX_ENTRIES:
         fail(f"{what}: expected a list")
     return payload
