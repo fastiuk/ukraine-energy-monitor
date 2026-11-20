@@ -73,9 +73,10 @@ Decoded = tuple[dict[str, tuple[Outage, ...]], dict[str, str]]  # outages and un
 
 
 def _members(payload: Any, what: str) -> list[Any]:
-    members = payload.get("hydra:member") if isinstance(payload, dict) else None
+    # A JSON-LD collection, or the plain list a cache in front of the API may serve instead.
+    members = payload.get("hydra:member") if isinstance(payload, dict) else payload
     if not isinstance(members, list) or len(members) > MAX_MEMBERS:
-        fail(f"Volyn: {what} response has no hydra:member list")
+        fail(f"Volyn: {what} response has no list")
     return members
 
 

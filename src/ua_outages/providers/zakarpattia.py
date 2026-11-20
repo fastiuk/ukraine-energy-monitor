@@ -106,9 +106,10 @@ class Glyph(NamedTuple):
 
 
 def _members(payload: Any) -> list[Any]:
-    members = payload.get("hydra:member") if isinstance(payload, dict) else None
+    # A JSON-LD collection, or the plain list a cache in front of the API may serve instead.
+    members = payload.get("hydra:member") if isinstance(payload, dict) else payload
     if not isinstance(members, list) or len(members) > MAX_MEMBERS:
-        fail("Zakarpattia: options response has no hydra:member list")
+        fail("Zakarpattia: options response has no list of options")
     return members
 
 

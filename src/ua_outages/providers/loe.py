@@ -41,6 +41,7 @@ DIRECTORY_URL = "https://power-api.loe.lviv.ua/api"
 MAX_RAW_HTML = 100_000  # a real day's schedule is about 1 KB
 MAX_SENTENCE = 300
 MAX_NOTES = 10
+MAX_MENUS = 100  # the site has a handful
 
 _DAY_RE = re.compile(r"графік\b[^\n]{0,200}?\bна\s+(\d{1,2})\.(\d{1,2})\.(\d{4})", re.IGNORECASE)
 _UPDATED_RE = re.compile(
@@ -110,9 +111,10 @@ def parse_day(raw_html: str, image_url: str | None = None) -> DaySchedule | None
 
 def parse_menu(payload: Any) -> dict[date, DaySchedule]:
     """Parse the ``/api/menus?type=photo-grafic`` response into schedules keyed by day."""
-    menus = payload.get("hydra:member") if isinstance(payload, dict) else None
-    if not isinstance(menus, list):
-        fail("LOE: response has no hydra:member list")
+    # A JSON-LD collection, or the plain list LOE's cache serves now and then (20.11.2026).
+    menus = payload.get("hydra:member") if isinstance(payload, dict) else payload
+    if not isinstance(menus, list) or len(menus) > MAX_MENUS:
+        fail("LOE: response has no list of menus")
     menu = next((m for m in menus if isinstance(m, dict) and m.get("type") == "photo-grafic"), None)
     if menu is None:
         fail("LOE: response has no photo-grafic menu")

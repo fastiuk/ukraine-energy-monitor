@@ -114,6 +114,11 @@ def test_loe():
     assert sorted(s.groups) == sorted(STANDARD_GROUPS)
     assert spans(s, "4.2") == [("10:00", "12:00", False), ("21:00", "22:30", False)]
     assert s.image_url == "https://api.loe.lviv.ua/media/6ad32af94506a_GPV.png"
+    # LOE's cache now and then serves the plain JSON list instead of the JSON-LD collection.
+    assert loe.parse_menu(fixture_json("loe_menu.json")["hydra:member"]) == schedules
+    for broken in ({"@type": "hydra:Collection"}, "menus", [{}] * 101):
+        with pytest.raises(SourceFormatError):
+            loe.parse_menu(broken)
 
 
 def test_mykolaiv():
@@ -423,6 +428,7 @@ def test_volyn_options_and_archive():
         return {"hydra:member": [{"option_key": "pw_gpv_image_today", "value": value}]}
 
     assert volyn.parse_options(options("")) == []
+    assert volyn.parse_options(options("/media/a_GPV.png")["hydra:member"]) == volyn.parse_options(options("/media/a_GPV.png"))
     for hostile in ("//evil.example/a.png", "@evil.example/a.png", "https://evil.example/a.png", "/a b.png", 5):
         with pytest.raises(SourceFormatError, match="plain path"):
             volyn.parse_options(options(hostile))
@@ -894,6 +900,8 @@ def test_zakarpattia_fetch():
     assert schedules[NOV20].updated_at == datetime(2026, 11, 20, 10, 10, 33, tzinfo=KYIV)  # Kyiv time labelled UTC
     assert schedules[NOV21].image_url == base + tomorrow and spans(schedules[NOV21], "1.1")[0] == ("08:30", "11:30", False)
     assert http.calls[0][0].endswith("?option_key[]=pw_gpv_image_today&option_key[]=pw_gpv_image_tomorrow")
+    plain = FakeHttp({f"{base}/api/options": options(today, tomorrow)["hydra:member"], **images})  # a cache's plain JSON
+    assert asyncio.run(zakarpattia.Zakarpattia().fetch(plain, kyiv(NOV20, 19))) == schedules
 
     # Seen images are not downloaded again; the 20th's, still in "today" on the 21st, is past.
     http = FakeHttp({f"{base}/api/options": options(today, tomorrow), **images})
