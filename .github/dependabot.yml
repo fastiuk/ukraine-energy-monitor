@@ -1,15 +1,22 @@
 version: 2
 updates:
   # Updates wait a week after release: a hijacked package is usually caught and pulled by then.
+  # One pull request per ecosystem a week, not one per package.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
   - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      uv:
+        patterns: ["*"]
