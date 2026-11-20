@@ -14,7 +14,8 @@ from collections import defaultdict
 from datetime import date
 
 from aiohttp import DummyCookieJar
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_CLOSE
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .const import SHARED_FETCH_TTL
@@ -35,13 +36,22 @@ SOURCE_DEADLINE = 90
 class SourceHub:
     def __init__(self, hass: HomeAssistant) -> None:
         # Its own session: some sites set bot-protection cookies we don't want in HA's shared jar.
-        self.session = async_create_clientsession(hass, cookie_jar=DummyCookieJar())
+        # HA's cleanup would tie it to the entry being set up and close it once that one entry fails
+        # or unloads, leaving every other entry with "Session is closed" until a restart. The hub
+        # lives as long as Home Assistant does, so it closes the session itself on shutdown.
+        self.session = async_create_clientsession(hass, cookie_jar=DummyCookieJar(), auto_cleanup=False)
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_CLOSE, self._close)
         self._cache: dict[tuple[str, str | None], tuple[float, dict[date, DaySchedule]]] = {}
         self._locks: defaultdict[tuple[str, str | None], asyncio.Lock] = defaultdict(asyncio.Lock)
         #: Which source served the last successful fetch, per operator/address.
         self.last_source: dict[tuple[str, str | None], str] = {}
         self._lookup_cache = ResponseCache(LOOKUP_CACHE_TTL, LOOKUP_CACHE_BYTES)
         self._lookup_throttles: dict[str, Throttle] = {}
+
+    @callback
+    def _close(self, _event: Event) -> None:
+        # Detached, not closed: the session runs on HA's shared connector, as HA's own cleanup does.
+        self.session.detach()
 
     def fetcher(self, hosts: frozenset[str], **kwargs) -> Fetcher:
         # ssl_context() was loaded in an executor when the integration was set up.
