@@ -64,7 +64,8 @@ def card_data(coordinator: OutageCoordinator) -> dict[str, Any]:
         days.append(
             {
                 "date": day.isoformat(),
-                "published": schedule is not None,
+                # A group the operator no longer has (renumbered) has no schedule, whatever the day.
+                "published": schedule is not None and group in op.groups,
                 "outages": [
                     {"from": _minutes(o.start, midnight), "to": _minutes(o.end, midnight), "possible": o.possible}
                     for o in (schedule.outages(group) if schedule else ())

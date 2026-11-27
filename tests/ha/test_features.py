@@ -9,6 +9,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
+from custom_components.ukraine_outages.card import card_data
 from custom_components.ukraine_outages.const import CONF_ADDRESS, CONF_ADDRESS_LABEL, CONF_GROUP, CONF_OPERATOR, DOMAIN
 from custom_components.ukraine_outages.ua_outages import DaySchedule, FetchError, Outage
 
@@ -242,12 +243,25 @@ async def test_a_group_chosen_before_the_operator_renumbered_is_to_be_checked(ky
     assert ir.async_get(hass).async_get_issue(DOMAIN, f"group_renumbered_{other.entry_id}") is None
 
 
-async def test_a_group_chosen_after_the_renumbering_is_fine(kyiv_hass, freezer, mock_fetch) -> None:
+async def test_a_group_chosen_under_the_new_numbering_is_fine(kyiv_hass, freezer, mock_fetch) -> None:
     hass = kyiv_hass
-    freezer.move_to(kyiv(9, day=17).replace(month=11, day=27))
-    entry = _dnem_entry("13.1")
+    freezer.move_to(kyiv(9))
+    # The config flow writes this on every entry of a renumbered operator (test_config_flow).
+    entry = MockConfigEntry(
+        domain=DOMAIN, title="13.1", data={CONF_OPERATOR: "dtek-dnem", CONF_GROUP: "13.1", "group_checked": "2026-11-26"},
+        unique_id="dtek-dnem:13.1",
+    )  # fmt: skip
     await _setup(hass, entry)
     assert ir.async_get(hass).async_get_issue(DOMAIN, f"group_renumbered_{entry.entry_id}") is None
+
+
+async def test_a_group_from_an_older_integration_is_checked_whenever_it_was_made(kyiv_hass, freezer, mock_fetch) -> None:
+    # Made after 26.11 by an integration that still offered 1.1–6.2: its creation time can't tell.
+    hass = kyiv_hass
+    freezer.move_to(kyiv(9, day=17).replace(month=11, day=29))
+    entry = _dnem_entry("4.1")
+    await _setup(hass, entry)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, f"group_renumbered_{entry.entry_id}") is not None
 
 
 async def test_a_group_the_operator_no_longer_has_is_unavailable_and_reported(kyiv_hass, freezer, mock_fetch) -> None:
@@ -257,5 +271,6 @@ async def test_a_group_the_operator_no_longer_has_is_unavailable_and_reported(ky
     await _setup(hass, entry)
     issue = ir.async_get(hass).async_get_issue(DOMAIN, f"group_renumbered_{entry.entry_id}")
     assert issue is not None and not issue.is_fixable and issue.translation_key == "group_gone"
-    # Never "power on" for a group with no schedule at all.
+    # Never "power on" for a group with no schedule at all: not on the card either.
     assert hass.states.get(entity_id(hass, "binary_sensor", "outage", "dtek-dnem:4.2")).state == "unavailable"
+    assert not card_data(entry.runtime_data)["days"][0]["published"]

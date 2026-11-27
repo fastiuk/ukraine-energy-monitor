@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
@@ -16,7 +14,7 @@ from . import card
 from .const import CONF_GROUP, CONF_GROUP_CHECKED, CONF_OPERATOR, DOMAIN
 from .coordinator import OutageCoordinator, OutagesConfigEntry, moved_issue_id, renumbered_issue_id, source_issue_id
 from .hub import SourceHub
-from .ua_outages import KYIV, Operator
+from .ua_outages import Operator
 from .ua_outages import operator as find_operator
 from .ua_outages.http import ssl_context
 
@@ -58,8 +56,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: OutagesConfigEntry) -> b
 
 
 def _check_group(hass: HomeAssistant, entry: OutagesConfigEntry, op: Operator) -> None:
-    """A group the operator no longer has, or one chosen before it renumbered its groups (ДТЕК ДнЕМ,
-    26.11.2026): say so in Repairs. The second may now be other houses; confirming keeps it."""
+    """A group the operator no longer has, or one not chosen under its current numbering (ДТЕК ДнЕМ
+    renumbered on 26.11.2026): say so in Repairs. The second may now be other houses; confirming
+    keeps it. An entry is known to be chosen under the numbering when it says so (``CONF_GROUP_CHECKED``,
+    written by the config flow or by confirming): its creation time can't tell, as an older
+    integration offered the old groups for days after the change."""
     group = entry.data.get(CONF_GROUP, "")
     issue_id = renumbered_issue_id(entry.entry_id)
     groups = f"{op.groups[0]}–{op.groups[-1]}" if op.groups else ""
@@ -71,8 +72,7 @@ def _check_group(hass: HomeAssistant, entry: OutagesConfigEntry, op: Operator) -
             translation_key="group_gone", translation_placeholders=placeholders,
         )  # fmt: skip
         return
-    before = since is not None and entry.created_at < datetime(since.year, since.month, since.day, tzinfo=KYIV)
-    if before and entry.data.get(CONF_GROUP_CHECKED) != since.isoformat():
+    if since is not None and str(entry.data.get(CONF_GROUP_CHECKED) or "") < since.isoformat():
         ir.async_create_issue(
             hass, DOMAIN, issue_id, is_fixable=True, severity=ir.IssueSeverity.WARNING,
             translation_key="group_renumbered",

@@ -175,7 +175,7 @@
       }
     },
     "group_renumbered": {
-      "title": "{operator} renumbered its {label}s on {date}: check {label} {group}",
+      "title": "{operator} renumbered its groups on {date}: check {label} {group}",
       "fix_flow": {
         "step": {
           "confirm": {

@@ -63,6 +63,14 @@ async def test_region_with_two_operators_and_the_group_menu(hass: HomeAssistant,
     assert result["title"] == "Дніпропетровська · Центральна енергетична компанія (ЦЕК) · черга 6.2"
 
 
+async def test_a_group_of_a_renumbered_operator_is_chosen_under_its_new_numbering(hass: HomeAssistant, mock_fetch) -> None:
+    result = await _configure(hass, await _start(hass), {CONF_REGION: "dnipropetrovska"})
+    result = await _configure(hass, result, {CONF_OPERATOR: "dtek-dnem"})
+    result = await _configure(hass, result, {"next_step_id": "group"})
+    result = await _configure(hass, result, {CONF_GROUP: "13.1"})
+    assert result["data"] == {CONF_OPERATOR: "dtek-dnem", CONF_GROUP: "13.1", "group_checked": "2026-11-26"}
+
+
 async def test_group_found_by_address(hass: HomeAssistant, mock_fetch) -> None:
     streets = [Choice("1", "вул. Хрещатик"), Choice("2", "пров. Хрещатий")]
     options, resolve = _lookup("dtek-kem", [streets, [Choice("10", "1")]], Resolution(("19.1",)))

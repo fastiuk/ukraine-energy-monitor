@@ -25,6 +25,7 @@ from .const import (
     CONF_ADDRESS_LABEL,
     CONF_CHOICE,
     CONF_GROUP,
+    CONF_GROUP_CHECKED,
     CONF_OPERATOR,
     CONF_QUERY,
     CONF_REGION,
@@ -236,6 +237,8 @@ class OutagesConfigFlow(ConfigFlow, domain=DOMAIN):
         except FetchError:
             return await self.async_step_retry()
         data: dict[str, Any] = {CONF_OPERATOR: op.id, CONF_GROUP: group}
+        if op.renumbered is not None:  # chosen under the current numbering: nothing to check
+            data[CONF_GROUP_CHECKED] = op.renumbered.isoformat()
         if op.by_address:
             data[CONF_ADDRESS] = self._address
             data[CONF_ADDRESS_LABEL] = self._address_label
