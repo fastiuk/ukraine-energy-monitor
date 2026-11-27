@@ -2,12 +2,13 @@
 
 ::
 
-    <div id="gsv_t"><div><b>18.10.2026</b></div></div>
+    <div id="gsv_t"><div><b>24.11.2026</b><a href="/shutdowns/?next">25.11.2026</a></div></div>
     <div id="gsv_a"><p>Графік актуальний станом на <b>17:00</b>...</p></div>
     <div id="inf1" data-id="1"><u>з</u><u>в</u>...48 cells...</div>      groups 1–12
 
 ``в`` — power off, ``з`` — on, ``мз`` — may be on. Until tomorrow is published ``?next`` serves
-today again, so the date in ``gsv_t`` decides which day a page is.
+today again, so the date in ``gsv_t`` decides which day a page is. Since November 2026 ``gsv_t``
+lists both days, the other one as a link: only the bold date is the page's own.
 """
 
 from __future__ import annotations
@@ -32,7 +33,8 @@ def parse(page: str, now: datetime) -> DaySchedule | None:
     title = root.find(id="gsv_t")
     if title is None:
         fail("Chernivtsi: no gsv_t date block")
-    if not (m := _DATE_RE.search(title.text())):
+    own = title.find("b") or title
+    if not (m := _DATE_RE.search(own.text())):
         return None
     try:
         day = date(int(m[3]), int(m[2]), int(m[1]))

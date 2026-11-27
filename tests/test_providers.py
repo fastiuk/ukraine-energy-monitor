@@ -220,6 +220,11 @@ def test_chernivtsi():
     s = chernivtsi.parse(page[:start] + row + page[row_end:], kyiv(OCT18, 18))
     assert spans(s, "1") == [("10:00", "12:00", False), ("12:00", "12:30", True)]
 
+    # Both days in gsv_t (since Nov 2026): the bold one is the page's own, the link is the other day.
+    title = '<b>18.10.2026</b>'
+    for markup in ('<a href="/shutdowns/">17.10.2026</a><b>18.10.2026</b>', '<b>18.10.2026</b><a href="/shutdowns/?next">19.10.2026</a>'):
+        assert chernivtsi.parse(page.replace(title, markup), kyiv(OCT18, 18)).day == OCT18
+
 
 def test_cherkasy():
     posts = cherkasy.pick_posts(fixture_json("cherkasy_posts.json"), OCT17)
