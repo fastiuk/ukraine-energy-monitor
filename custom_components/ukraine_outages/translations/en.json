@@ -173,6 +173,21 @@
           }
         }
       }
+    },
+    "group_renumbered": {
+      "title": "{operator} renumbered its {label}s on {date}: check {label} {group}",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "{operator}: is {label} {group} still yours?",
+            "description": "Since {date} {operator} publishes schedules under new numbers ({groups}), so {label} {group} may now be other houses. Find yours by address: add the integration again and choose “Find the group by address”, then delete this entry. If {group} is right, confirm and this will not show again."
+          }
+        }
+      }
+    },
+    "group_gone": {
+      "title": "{operator} no longer has {label} {group}",
+      "description": "{operator} now publishes schedules for {groups}; {group} is not among them, so this entry has no schedule (its entities are unavailable). Add the integration again, find your {label} by address, then delete this entry."
     }
   }
 }

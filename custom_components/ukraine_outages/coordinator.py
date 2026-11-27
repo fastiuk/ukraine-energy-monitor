@@ -67,6 +67,10 @@ def moved_issue_id(entry_id: str) -> str:
     return f"address_moved_{entry_id}"
 
 
+def renumbered_issue_id(entry_id: str) -> str:
+    return f"group_renumbered_{entry_id}"
+
+
 def scan_minutes(op: Operator, requested: int) -> int:
     """The requested interval, but never more often than the operator's sources allow."""
     return max(requested, -(-op.poll_interval // 60), 1)

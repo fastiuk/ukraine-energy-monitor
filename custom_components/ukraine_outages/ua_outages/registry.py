@@ -6,6 +6,7 @@ Region and operator ids are stored in the bot's database and in buttons: never r
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 from .providers.base import AddressLookup, AddressSource, Provider
 from .providers.cherkasy import Cherkasy
@@ -53,6 +54,9 @@ class Operator:
     note: str | None = None
     #: The operator's open directory "address → group", if there is one.
     lookup: AddressLookup | None = None
+    #: The day the operator last renumbered its groups (ДТЕК ДнЕМ, 26.11.2026: 18 queues instead
+    #: of 6 × 2). A group chosen before it may be gone or now be other houses: ask to check it.
+    renumbered: date | None = None
 
     @property
     def available(self) -> bool:
@@ -113,7 +117,11 @@ OPERATORS: tuple[Operator, ...] = (
         "dtek-dnem", "ДТЕК Дніпровські електромережі", "dnipropetrovska",
         "https://www.dtek-dnem.com.ua/ua/shutdowns",
         sources=(Yasno(region=3, dso=301), DtekPage("dnem"), OutageDataUa("dnipro")),
+        # Since 26.11.2026 (around 09:20) 18 queues 1.1–18.1, by territory, instead of 6 × 2:
+        # YASNO, the site and the mirror all switched; the address directory gives the new ones.
+        groups=tuple(f"{n}.1" for n in range(1, 19)),
         lookup=YasnoLookup(3, 301, cities=True, city_example="Дніпро", street_example="Шевченка"),
+        renumbered=date(2026, 11, 26),
     ),
     Operator(
         "cek", "Центральна енергетична компанія (ЦЕК)", "dnipropetrovska", "https://cek.dp.ua",

@@ -196,3 +196,66 @@ async def test_card_data(kyiv_hass, freezer, mock_fetch, config_entry, hass_ws_c
     await client.send_json({"id": 2, "type": "ukraine_outages/card", "device_id": "nope"})
     reply = await client.receive_json()
     assert not reply["success"] and reply["error"]["code"] == "not_found"
+
+
+def _dnem_entry(group: str) -> MockConfigEntry:
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title=f"Дніпропетровська · ДТЕК Дніпровські електромережі · черга {group}",
+        data={CONF_OPERATOR: "dtek-dnem", CONF_GROUP: group},
+        unique_id=f"dtek-dnem:{group}",
+    )
+
+
+async def test_a_group_chosen_before_the_operator_renumbered_is_to_be_checked(kyiv_hass, freezer, mock_fetch) -> None:
+    hass = kyiv_hass
+    assert await async_setup_component(hass, "repairs", {})
+    freezer.move_to(kyiv(9))  # 17.10: before ДТЕК ДнЕМ renumbered its queues (26.11)
+    entry = _dnem_entry("4.1")
+    await _setup(hass, entry)
+    issue_id = f"group_renumbered_{entry.entry_id}"
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    assert issue is not None and issue.is_fixable and issue.translation_key == "group_renumbered"
+    assert issue.translation_placeholders == {
+        "operator": "ДТЕК Дніпровські електромережі", "group": "4.1", "label": "черга", "groups": "1.1–18.1", "date": "26.11.2026",
+    }  # fmt: skip
+    assert hass.states.get(entity_id(hass, "binary_sensor", "outage", "dtek-dnem:4.1")).state != "unavailable"
+
+    # "Yes, it is mine": kept on the entry, so the issue does not come back after a restart.
+    flows = hass.data["repairs"]["flow_manager"]
+    result = await flows.async_init(DOMAIN, data={"issue_id": issue_id})
+    assert result["step_id"] == "confirm"
+    result = await flows.async_configure(result["flow_id"], {})
+    assert result["type"] == "create_entry"
+    assert entry.data["group_checked"] == "2026-11-26"
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+
+    # Removing the entry takes any such issue with it.
+    freezer.move_to(kyiv(9))
+    other = _dnem_entry("5.1")
+    await _setup(hass, other)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, f"group_renumbered_{other.entry_id}") is not None
+    assert await hass.config_entries.async_remove(other.entry_id)
+    await hass.async_block_till_done()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, f"group_renumbered_{other.entry_id}") is None
+
+
+async def test_a_group_chosen_after_the_renumbering_is_fine(kyiv_hass, freezer, mock_fetch) -> None:
+    hass = kyiv_hass
+    freezer.move_to(kyiv(9, day=17).replace(month=11, day=27))
+    entry = _dnem_entry("13.1")
+    await _setup(hass, entry)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, f"group_renumbered_{entry.entry_id}") is None
+
+
+async def test_a_group_the_operator_no_longer_has_is_unavailable_and_reported(kyiv_hass, freezer, mock_fetch) -> None:
+    hass = kyiv_hass
+    freezer.move_to(kyiv(9))
+    entry = _dnem_entry("4.2")
+    await _setup(hass, entry)
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, f"group_renumbered_{entry.entry_id}")
+    assert issue is not None and not issue.is_fixable and issue.translation_key == "group_gone"
+    # Never "power on" for a group with no schedule at all.
+    assert hass.states.get(entity_id(hass, "binary_sensor", "outage", "dtek-dnem:4.2")).state == "unavailable"

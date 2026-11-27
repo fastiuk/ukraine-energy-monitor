@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryError
@@ -11,9 +13,10 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.util.hass_dict import HassKey
 
 from . import card
-from .const import CONF_OPERATOR, DOMAIN
-from .coordinator import OutageCoordinator, OutagesConfigEntry, moved_issue_id, source_issue_id
+from .const import CONF_GROUP, CONF_GROUP_CHECKED, CONF_OPERATOR, DOMAIN
+from .coordinator import OutageCoordinator, OutagesConfigEntry, moved_issue_id, renumbered_issue_id, source_issue_id
 from .hub import SourceHub
+from .ua_outages import KYIV, Operator
 from .ua_outages import operator as find_operator
 from .ua_outages.http import ssl_context
 
@@ -44,12 +47,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: OutagesConfigEntry) -> b
     op = find_operator(entry.data[CONF_OPERATOR])
     if op is not None and not op.available:
         raise ConfigEntryError(f"{op.name}: {op.note or 'графіки недоступні'}")
+    if op is not None:
+        _check_group(hass, entry, op)
     coordinator = OutageCoordinator(hass, entry, await get_hub(hass))
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     entry.async_on_unload(coordinator.cancel_transition)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+def _check_group(hass: HomeAssistant, entry: OutagesConfigEntry, op: Operator) -> None:
+    """A group the operator no longer has, or one chosen before it renumbered its groups (ДТЕК ДнЕМ,
+    26.11.2026): say so in Repairs. The second may now be other houses; confirming keeps it."""
+    group = entry.data.get(CONF_GROUP, "")
+    issue_id = renumbered_issue_id(entry.entry_id)
+    groups = f"{op.groups[0]}–{op.groups[-1]}" if op.groups else ""
+    since = op.renumbered
+    placeholders = {"operator": op.name, "group": group, "label": op.group_label, "groups": groups}
+    if group not in op.groups:
+        ir.async_create_issue(
+            hass, DOMAIN, issue_id, is_fixable=False, severity=ir.IssueSeverity.ERROR,
+            translation_key="group_gone", translation_placeholders=placeholders,
+        )  # fmt: skip
+        return
+    before = since is not None and entry.created_at < datetime(since.year, since.month, since.day, tzinfo=KYIV)
+    if before and entry.data.get(CONF_GROUP_CHECKED) != since.isoformat():
+        ir.async_create_issue(
+            hass, DOMAIN, issue_id, is_fixable=True, severity=ir.IssueSeverity.WARNING,
+            translation_key="group_renumbered",
+            translation_placeholders={**placeholders, "date": f"{since:%d.%m.%Y}"},
+            data={"entry_id": entry.entry_id, "since": since.isoformat()},
+        )  # fmt: skip
+        return
+    ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: OutagesConfigEntry) -> bool:
@@ -59,6 +90,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: OutagesConfigEntry) -> 
 async def async_remove_entry(hass: HomeAssistant, entry: OutagesConfigEntry) -> None:
     """Its Repairs issues go with it; the source's one too once no entry of the operator is left."""
     ir.async_delete_issue(hass, DOMAIN, moved_issue_id(entry.entry_id))
+    ir.async_delete_issue(hass, DOMAIN, renumbered_issue_id(entry.entry_id))
     op = find_operator(entry.data.get(CONF_OPERATOR, ""))
     others = [e for e in hass.config_entries.async_entries(DOMAIN) if e.entry_id != entry.entry_id and e.data.get(CONF_OPERATOR) == entry.data.get(CONF_OPERATOR)]
     if op is not None and not others:

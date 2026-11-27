@@ -32,8 +32,9 @@ class OutageEntity(CoordinatorEntity[OutageCoordinator]):
     @property
     def available(self) -> bool:
         # A published schedule stays valid while the site is unreachable,
-        # which often happens exactly during outages.
-        return self.coordinator.data is not None
+        # which often happens exactly during outages. A group the operator no longer has
+        # (renumbered) has no schedule at all: unavailable, never "power on" (see Repairs).
+        return self.coordinator.data is not None and self.coordinator.group in self.coordinator.operator.groups
 
 
 def fmt_outage(outage: Outage, day: date) -> str:

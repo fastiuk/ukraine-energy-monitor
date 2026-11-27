@@ -1,7 +1,11 @@
 import re
+from datetime import date
 
+from ua_outages import operator, trim_schedules
 from ua_outages.http import forbidden_host
-from ua_outages.registry import OCCUPIED, OPERATORS, OPERATORS_BY_ID, REGIONS, REGIONS_BY_ID
+from ua_outages.providers.dtek import plain_groups
+from ua_outages.providers.yasno import parse_planned
+from ua_outages.registry import OCCUPIED, OPERATORS, OPERATORS_BY_ID, REGIONS, REGIONS_BY_ID, STANDARD_GROUPS
 
 ID_RE = re.compile(r"[a-z][a-z0-9-]{1,19}")
 
@@ -71,3 +75,14 @@ def test_no_source_points_at_the_aggressors_domains():
         hosts += list(operator.lookup.hosts) if operator.lookup else []
         for host in hosts:
             assert not forbidden_host(host), f"{operator.id}: {host}"
+
+
+def test_dtek_dnem_has_18_queues_since_it_renumbered_them():
+    # 26.11.2026: YASNO, the site and the mirror switched from 6 × 2 to 1.1–18.1, by territory.
+    dnem, cek = operator("dtek-dnem"), operator("cek")
+    assert dnem.groups == tuple(f"{n}.1" for n in range(1, 19)) and dnem.renumbered == date(2026, 11, 26)
+    assert cek.groups == STANDARD_GROUPS and cek.renumbered is None  # ЦЕК kept its 6 × 2
+    payload = {f"{n}.1": {"today": {"date": "2026-11-27T00:00:00+02:00", "status": "NoOutages"}} for n in (4, 13, 18)}
+    trimmed = trim_schedules(parse_planned(payload), today=date(2026, 11, 27), groups=dnem.groups)
+    assert trimmed[date(2026, 11, 27)].mentioned_groups() == ["4.1", "13.1", "18.1"]
+    assert plain_groups("GPV18.1") == "18.1"

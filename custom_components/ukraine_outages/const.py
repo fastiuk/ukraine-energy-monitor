@@ -12,6 +12,8 @@ CONF_CHOICE = "choice"
 
 #: Minutes between schedule fetches (options flow); never below the source's own minimum.
 CONF_SCAN_INTERVAL = "scan_interval"
+#: The operator's renumbering (``Operator.renumbered``) this entry's group was confirmed after.
+CONF_GROUP_CHECKED = "group_checked"
 DEFAULT_SCAN_INTERVAL = 5
 MAX_SCAN_INTERVAL = 60
 
