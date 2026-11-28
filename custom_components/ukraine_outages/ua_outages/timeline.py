@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
 from .models import DaySchedule, Outage, merge_outages
@@ -42,13 +42,18 @@ def current_outage(
     schedules: Iterable[DaySchedule], group: str, now: datetime, *, possible: bool = False
 ) -> Outage | None:
     outages = group_outages(schedules, group, possible=possible)
-    return next((o for o in outages if o.start <= now < o.end), None)
+    now = now.astimezone(UTC)
+    return next(
+        (o for o in outages if o.start.astimezone(UTC) <= now < o.end.astimezone(UTC)), None
+    )
 
 
 def next_outage(
     schedules: Iterable[DaySchedule], group: str, now: datetime, *, possible: bool = False
 ) -> Outage | None:
-    return next((o for o in group_outages(schedules, group, possible=possible) if o.start > now), None)
+    now = now.astimezone(UTC)
+    outages = group_outages(schedules, group, possible=possible)
+    return next((o for o in outages if o.start.astimezone(UTC) > now), None)
 
 
 @dataclass(frozen=True)
@@ -141,7 +146,7 @@ def combine_schedules(parts: Iterable[Mapping[date, DaySchedule]]) -> dict[date,
             stamps = [s.updated_at for s in (other, schedule) if s.updated_at]
             combined[day] = DaySchedule(
                 day,
-                max(stamps) if stamps else None,
+                max(stamps, key=lambda stamp: stamp.astimezone(UTC)) if stamps else None,
                 {**other.groups, **schedule.groups},
                 {**other.unknown, **schedule.unknown},
                 tuple(dict.fromkeys(other.notes + schedule.notes)),
