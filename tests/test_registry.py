@@ -59,6 +59,15 @@ def test_address_lookups_and_per_address_operators():
     assert len("p:0123abcd:23") <= 64
 
 
+def test_vinnytsia_uses_a_labelled_public_mirror_without_address_lookup():
+    op = operator("vinnytsia-oe")
+    assert op.available and not op.official and not op.by_address
+    assert op.groups == STANDARD_GROUPS and op.lookup is None
+    assert op.sources[0].link == "https://bezsvitla.com.ua/vinnytska-oblast"
+    assert op.poll_interval == 600
+    assert "неофіційного" in op.note
+
+
 def test_occupied_territories_are_listed_but_never_fetched():
     occupied = [r for r in REGIONS if r.occupied]
     assert {r.id for r in occupied} == {"crimea", "sevastopol"}

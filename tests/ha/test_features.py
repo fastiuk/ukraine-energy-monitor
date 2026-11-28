@@ -1,5 +1,6 @@
 """The schedule event, the source sensor, Repairs and the card's data."""
 
+from dataclasses import replace
 from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntryState
@@ -12,6 +13,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry, async_
 from custom_components.ukraine_outages.card import card_data
 from custom_components.ukraine_outages.const import CONF_ADDRESS, CONF_ADDRESS_LABEL, CONF_GROUP, CONF_OPERATOR, DOMAIN
 from custom_components.ukraine_outages.ua_outages import DaySchedule, FetchError, Outage
+from custom_components.ukraine_outages.ua_outages.registry import operator
 
 from .conftest import DAY, GROUP, OPERATOR, UNIQUE_ID, entity_id, kyiv, schedules
 
@@ -155,8 +157,12 @@ async def test_removing_the_last_entry_removes_its_issues(kyiv_hass, freezer, mo
     assert ir.async_get(hass).async_get_issue(DOMAIN, f"source_unavailable_{OPERATOR}") is None
 
 
-async def test_an_operator_without_sources_says_why(kyiv_hass) -> None:
+async def test_an_operator_without_sources_says_why(kyiv_hass, monkeypatch) -> None:
     """Vinnytsia lost its only source (11.2026): an entry made before says why, not a traceback."""
+    unavailable = replace(
+        operator("vinnytsia-oe"), sources=(), note="Графіки лише на disconnection.voe.com.ua",
+    )
+    monkeypatch.setattr("custom_components.ukraine_outages.find_operator", lambda _: unavailable)
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Вінниця, вул. Соборна, 1 · черга 1.1",
@@ -166,6 +172,20 @@ async def test_an_operator_without_sources_says_why(kyiv_hass) -> None:
     entry.add_to_hass(kyiv_hass)
     assert not await kyiv_hass.config_entries.async_setup(entry.entry_id)
     assert entry.state is ConfigEntryState.SETUP_ERROR and "disconnection.voe.com.ua" in entry.reason
+
+
+async def test_old_vinnytsia_address_entry_works_with_the_restored_queue_source(kyiv_hass, freezer, mock_fetch) -> None:
+    freezer.move_to(kyiv(9))
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Вінниця, вул. Соборна, 1 · черга 1.1",
+        data={CONF_OPERATOR: "vinnytsia-oe", CONF_GROUP: "1.1", CONF_ADDRESS: "1/2/3", CONF_ADDRESS_LABEL: "Вінниця, вул. Соборна, 1"},
+        unique_id="vinnytsia-oe:1/2/3",
+    )
+    await _setup(kyiv_hass, entry)
+    assert entry.state is ConfigEntryState.LOADED
+    state = kyiv_hass.states.get(entity_id(kyiv_hass, "binary_sensor", "outage", entry.unique_id))
+    assert state.state == "off"
 
 
 async def test_card_data(kyiv_hass, freezer, mock_fetch, config_entry, hass_ws_client) -> None:

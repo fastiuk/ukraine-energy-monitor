@@ -24,6 +24,7 @@ from .providers.prykarpattia import Prykarpattia
 from .providers.rivne import Rivne
 from .providers.sumy_news import SumyNews
 from .providers.ternopil import Ternopil, TernopilLookup
+from .providers.vinnytsia_bezsvitla import VinnytsiaBezSvitla
 from .providers.volyn import Volyn
 from .providers.yasno import Yasno, YasnoLookup
 from .providers.zakarpattia import Zakarpattia
@@ -102,11 +103,11 @@ OPERATORS: tuple[Operator, ...] = (
         sources=(OutageDataUa("kyiv-region"),),
     ),
     Operator(
-        # Since 28.10.2026 /disconnection/detailed (providers/vinnytsia.py, kept in case it comes
-        # back) redirects here, behind a Cloudflare challenge: not for us to get around.
+        # The operator's address form remains behind Cloudflare; read only the public mirror.
         "vinnytsia-oe", "Вінницяобленерго", "vinnytska", "https://disconnection.voe.com.ua/",
-        note="Вінницяобленерго показує графік лише на своєму сайті disconnection.voe.com.ua, закритому від "
-        "автоматичних запитів, тож бот не може його отримати. Перевірити свою чергу можна на сайті оператора.",
+        sources=(VinnytsiaBezSvitla(),),
+        note="Графік із неофіційного джерела «Без світла»: https://bezsvitla.com.ua/vinnytska-oblast. "
+        "Перевірити свою чергу можна на сайті Вінницяобленерго.",
     ),
     Operator(
         "volyn-oe", "Волиньобленерго", "volynska",
