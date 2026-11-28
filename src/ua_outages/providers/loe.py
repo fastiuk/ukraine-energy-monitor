@@ -30,7 +30,7 @@ from typing import Any
 from ..http import Fetcher
 from ..models import KYIV, DaySchedule, Outage
 from ._address import clean_label, entries, normalize_group, numeric_id, pick, require_id, search_term
-from ._text import html_lines, parse_intervals
+from ._text import INTERVAL_RE, html_lines, parse_intervals
 from .base import AddressLookup, Choice, Kind, Provider, Resolution, Step, fail, url_on_host
 
 log = logging.getLogger(__name__)
@@ -48,11 +48,18 @@ _UPDATED_RE = re.compile(
     r"станом\s+на\s+(\d{1,2}):(\d{2})\s+(\d{1,2})\.(\d{1,2})\.(\d{4})", re.IGNORECASE
 )
 _GROUP_RE = re.compile(r"Груп[аи]\s+(\d)\s*\.\s*(\d)\.?", re.IGNORECASE)
-_POWER_ON_RE = re.compile(r"електроенергія\s+є|відключень\s+не", re.IGNORECASE)
+_POWER_ON_RE = re.compile(
+    r"електроенергія\s{1,3}є\b|відключень\s{1,3}(?:немає|не\s{1,3}(?:буде|заплановано|передбачено|планується))\b",
+    re.IGNORECASE,
+)
+_TIME_RE = re.compile(r"(?<!\d)\d{1,2}[:.]\d{2}(?!\d)")
 
 
 def _outages(day: date, sentence: str) -> tuple[Outage, ...] | None:
     """Outages from one group sentence; ``()`` when power is on, ``None`` if unrecognised."""
+    # A second interval with a missing separator/end must not silently disappear.
+    if _TIME_RE.search(INTERVAL_RE.sub("", sentence)):
+        return None
     if (outages := parse_intervals(day, sentence)) is not None:
         return outages
     if _POWER_ON_RE.search(sentence):

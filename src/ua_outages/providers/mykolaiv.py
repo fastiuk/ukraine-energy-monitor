@@ -61,19 +61,28 @@ def parse(queues: Any, series: Any, active: Any) -> dict[date, DaySchedule]:
     schedules = {}
     for item in _list(active, "active schedules"):
         if not isinstance(item, dict):
-            continue
+            fail("Mykolaiv: schedule is not an object")
         try:
             day = datetime.fromisoformat(str(item.get("from")).replace("Z", "+00:00")).astimezone(KYIV).date()
         except (ValueError, OverflowError):
             fail("Mykolaiv: schedule has no valid 'from'")
         outages: dict[str, list[Outage]] = defaultdict(list)
         for cell in _list(item.get("series"), "series"):
-            if not isinstance(cell, dict) or (possible := TYPES.get(cell.get("type"))) is None:
+            if not isinstance(cell, dict):
+                fail("Mykolaiv: series cell is not an object")
+            kind = cell.get("type")
+            if not isinstance(kind, str) or (kind not in TYPES and kind != "ENABLE"):
+                fail("Mykolaiv: unknown series cell type")
+            queue_id, slot_id = cell.get("outage_queue_id"), cell.get("time_series_id")
+            if type(queue_id) is not int or type(slot_id) is not int:
+                fail("Mykolaiv: series cell has invalid queue or time slot id")
+            group, slot = groups.get(queue_id), slots.get(slot_id)
+            if group is None or slot is None:
+                fail("Mykolaiv: series cell refers to an unknown queue or time slot")
+            if kind == "ENABLE":
                 continue
-            group, slot = groups.get(cell.get("outage_queue_id")), slots.get(cell.get("time_series_id"))
-            if group and slot:
-                (h1, m1), (h2, m2) = slot
-                outages[group].append(Outage(at(day, h1, m1), at(day, h2, m2), possible))
+            (h1, m1), (h2, m2) = slot
+            outages[group].append(Outage(at(day, h1, m1), at(day, h2, m2), TYPES[kind]))
         schedules[day] = DaySchedule(
             day, groups={g: merge_outages(outages.get(g, ())) for g in sorted(set(groups.values()))}
         )

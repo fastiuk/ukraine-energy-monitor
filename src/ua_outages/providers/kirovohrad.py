@@ -44,7 +44,8 @@ _DAY_RE = re.compile(
 )
 _CANCELLED_RE = re.compile(r"застосування\s{1,3}графіка[^\n]{0,80}скасовано", re.IGNORECASE)
 _FORECAST_RE = re.compile(r"прогноз", re.IGNORECASE)
-_GROUP_LINE_RE = re.compile(r"Черга\s{1,3}([1-6])\s{0,2}\.\s{0,2}([12])\s{0,3}:\s{0,3}(.{0,300})")
+_GROUP_MARK_RE = re.compile(r"[^\w]{0,12}Черга\s{1,3}([1-6])\s{0,2}[./]\s{0,2}([12])(?!\d)", re.IGNORECASE)
+_GROUP_BODY_RE = re.compile(r"\s{0,3}[:–—-]\s{0,3}(.{0,300})")
 _SPAN_RE = re.compile(r"(?<![\d:])(\d{1,2})(?::(\d{2}))?\s{0,3}[-–—]\s{0,3}(\d{1,2})(?::(\d{2}))?(?![\d:])")
 _NONE_RE = re.compile(r"\s{0,3}[-–—]?\s{0,3}")
 UNRECOGNISED = "Нерозпізнаний графік"
@@ -97,15 +98,23 @@ def parse_post(lines: list[str], published: datetime) -> DaySchedule | None:
     groups: dict[str, tuple[Outage, ...]] = dict.fromkeys(GROUPS, ())
     unknown: dict[str, str] = {}
     if not _CANCELLED_RE.search(text):
+        found_group = False
         for line in lines:
-            if (g := _GROUP_LINE_RE.fullmatch(line)) is None:
+            if (g := _GROUP_MARK_RE.match(line)) is None:
                 continue
+            found_group = True
             group = f"{g[1]}.{g[2]}"
-            if (outages := _outages(day, g[3])) is None:
+            body = _GROUP_BODY_RE.fullmatch(line[g.end() :])
+            outages = _outages(day, body[1]) if body else None
+            if outages is None:
                 groups.pop(group, None)
                 unknown[group] = UNRECOGNISED
             else:
+                unknown.pop(group, None)
                 groups[group] = outages
+        if not found_group:
+            groups.clear()
+            unknown = dict.fromkeys(GROUPS, UNRECOGNISED)
     return DaySchedule(day, published, groups, unknown)
 
 

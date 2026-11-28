@@ -64,7 +64,7 @@ def parse(page: str, today: date) -> dict[date, DaySchedule]:
                     parts[-1] += child.text()
             lines += [p.strip() for p in parts if p.strip()]
         text = "\n".join(lines)
-        groups, unknown = parse_group_text(day, text)
+        groups, unknown = parse_group_text(day, text, strict=True)
         if not groups and not unknown:
             continue
         if _REST_OFF_RE.search(text):
