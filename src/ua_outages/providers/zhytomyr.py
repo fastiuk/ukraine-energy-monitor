@@ -62,34 +62,50 @@ def parse(page: str, today: date | None = None) -> dict[date, DaySchedule]:
             pass
 
     days: dict[date, tuple[dict[str, tuple[Outage, ...]], dict[str, str]]] = {}
-    day: date | None = None
-    for row in root.find_all("tr"):
-        cells = _cells(row)
-        header = next((c for c in cells if c.attrs.get("colspan") == "48"), None)
-        if header is not None and (m := _DATE_RE.fullmatch(header.text())):
-            try:
-                day = date(int(m[3]), int(m[2]), int(m[1]))
-            except ValueError:
-                fail(f"Zhytomyr: invalid date {header.text()!r}")
-            days.setdefault(day, ({}, {}))
-            continue
-        label = next(
-            (
-                c.text()
-                for c in cells
-                if _GROUP_RE.fullmatch(c.text()) and any("pidcherga_id" in a.attrs.get("href", "") for a in c.find_all("a"))
-            ),
-            None,
-        )
-        if label is None or day is None:
-            continue
-        colors = [m[1].lower() for c in cells if (m := _BACKGROUND_RE.search(c.attrs.get("style", "")))]
-        groups, unknown = days[day]
-        states = [COLORS.get(color) for color in colors[-48:]]
-        if len(states) != 48 or None in states:
-            unknown[label] = "Нерозпізнаний графік"
-        else:
-            groups[label] = outages_from_slots(day, states)  # type: ignore[arg-type]
+    for table in root.find_all("table"):
+        day: date | None = None
+        # Layout tables contain the schedule table; process each row only in its own table.
+        for row in table.find_all("tr", nested=False):
+            cells = _cells(row)
+            # An unsupported date-bearing header must not leave the previous day active.
+            header = next(
+                (
+                    c for c in cells
+                    if c.find("table") is None
+                    and (c.attrs.get("colspan") == "48" or _DATE_RE.search(c.text(100)))
+                ),
+                None,
+            )
+            if header is not None:
+                if header.attrs.get("colspan") != "48" or not (m := _DATE_RE.fullmatch(header.text())):
+                    fail(f"Zhytomyr: invalid date header {header.text()!r}")
+                try:
+                    day = date(int(m[3]), int(m[2]), int(m[1]))
+                except ValueError:
+                    fail(f"Zhytomyr: invalid date {header.text()!r}")
+                days.setdefault(day, ({}, {}))
+                continue
+            label = next(
+                (
+                    c.text()
+                    for c in cells
+                    if _GROUP_RE.fullmatch(c.text()) and any("pidcherga_id" in a.attrs.get("href", "") for a in c.find_all("a"))
+                ),
+                None,
+            )
+            if label is None:
+                continue
+            if day is None:
+                fail("Zhytomyr: schedule row has no date header")
+            groups, unknown = days[day]
+            if label in groups or label in unknown:
+                fail(f"Zhytomyr: duplicate group {label!r} for {day}")
+            colors = [m[1].lower() for c in cells if (m := _BACKGROUND_RE.search(c.attrs.get("style", "")))]
+            states = [COLORS.get(color) for color in colors[-48:]]
+            if len(states) != 48 or None in states:
+                unknown[label] = "Нерозпізнаний графік"
+            else:
+                groups[label] = outages_from_slots(day, states)  # type: ignore[arg-type]
     if not days:
         if _not_applied(root):
             if today is not None and _EMERGENCY_RE.search(root.text(5000)):
