@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
+from functools import total_ordering
+from itertools import groupby
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -27,28 +29,55 @@ def at_minute(day: date, minutes: int) -> datetime:
     return at(day, *divmod(minutes, 60))
 
 
-@dataclass(frozen=True, order=True)
+@total_ordering
+@dataclass(frozen=True, eq=False)
 class Outage:
     """A power-off interval; both ends are tz-aware Kyiv datetimes.
 
     ``possible`` marks an outage the schedule only says may happen (grey or yellow cells,
     "можливе відключення").
+
+    Endpoints in a skipped wall-clock hour raise ``ValueError``: the source must give
+    real times rather than leave us to invent how its interval crosses the clock change.
     """
 
     start: datetime
     end: datetime
     possible: bool = False
 
+    def __post_init__(self) -> None:
+        for moment in (self.start, self.end):
+            restored = moment.astimezone(UTC).astimezone(moment.tzinfo)
+            if restored.replace(tzinfo=None) != moment.replace(tzinfo=None):
+                raise ValueError(f"nonexistent outage endpoint: {moment.isoformat()}")
+
+    def _instant_key(self) -> tuple[datetime, datetime, bool]:
+        # Datetimes sharing a ZoneInfo compare by wall time and ignore ``fold``.
+        return self.start.astimezone(UTC), self.end.astimezone(UTC), self.possible
+
+    def __eq__(self, other: object) -> bool:
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return self._instant_key() == other._instant_key()
+
+    def __lt__(self, other: object) -> bool:
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return self._instant_key() < other._instant_key()
+
+    def __hash__(self) -> int:
+        return hash(self._instant_key())
+
     @property
     def duration(self) -> timedelta:
-        return self.end - self.start
+        return self.end.astimezone(UTC) - self.start.astimezone(UTC)
 
 
 def _join(outages: Iterable[Outage]) -> list[Outage]:
     joined: list[Outage] = []
     for outage in sorted(outages):
-        if joined and outage.start <= joined[-1].end:
-            if outage.end > joined[-1].end:
+        if joined and outage.start.astimezone(UTC) <= joined[-1].end.astimezone(UTC):
+            if outage.end.astimezone(UTC) > joined[-1].end.astimezone(UTC):
                 joined[-1] = replace(joined[-1], end=outage.end)
         else:
             joined.append(outage)
@@ -59,13 +88,15 @@ def _cut(outage: Outage, definite: Sequence[Outage]) -> list[Outage]:
     pieces = [outage]
     for d in definite:
         rest = []
+        d_start, d_end = d.start.astimezone(UTC), d.end.astimezone(UTC)
         for piece in pieces:
-            if d.end <= piece.start or d.start >= piece.end:
+            start, end = piece.start.astimezone(UTC), piece.end.astimezone(UTC)
+            if d_end <= start or d_start >= end:
                 rest.append(piece)
                 continue
-            if piece.start < d.start:
+            if start < d_start:
                 rest.append(replace(piece, end=d.start))
-            if d.end < piece.end:
+            if d_end < end:
                 rest.append(replace(piece, start=d.end))
         pieces = rest
     return pieces
@@ -92,13 +123,20 @@ class Slot(StrEnum):
 
 
 def outages_from_slots(day: date, slots: Sequence[Slot], *, minutes: int = 30) -> tuple[Outage, ...]:
-    """Outages from consecutive cells of ``minutes`` each, starting at midnight of ``day``."""
+    """Outages from consecutive cells of ``minutes`` each, starting at midnight of ``day``.
+
+    Raises ``ValueError`` when an outage run starts or ends in a skipped wall-clock hour.
+    Equal cells are joined first, so a run with real endpoints can span that hour.
+    """
     outages = []
-    for i, slot in enumerate(slots):
+    start_index = 0
+    for slot, cells in groupby(slots):
+        end_index = start_index + sum(1 for _ in cells)
         if slot is not Slot.ON:
-            start = at_minute(day, i * minutes)
-            end = at_minute(day, (i + 1) * minutes)
+            start = at_minute(day, start_index * minutes)
+            end = at_minute(day, end_index * minutes)
             outages.append(Outage(start, end, possible=slot is Slot.MAYBE))
+        start_index = end_index
     return merge_outages(outages)
 
 
