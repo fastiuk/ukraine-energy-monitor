@@ -160,7 +160,7 @@ def test_published_files():
 
 def test_what_each_operator_reads():
     """Official: the operator's own site, API or channel; a mirror is not. Fallbacks after «резерв»."""
-    assert {op.id for op in ordered() if op.available and not op.official} == {"dtek-krem"}
+    assert {op.id for op in ordered() if op.available and not op.official} == {"dtek-krem", "vinnytsia-oe"}
     assert official_cell(operator("lviv-oe")) == "✅"
     assert official_cell(operator("dtek-kem")) == "✅ · резерв ❌"
     assert official_cell(operator("dtek-dnem")) == "✅ · резерв ✅ ❌"
